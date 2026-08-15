@@ -138,6 +138,16 @@ def load_model(
         vision_tower = AutoModel.from_pretrained('facebook/dinov2-base')
         vision_tower = vision_tower.cuda().eval()
         vision_tower.requires_grad_(False)
+    
+    if 'ft-dinosaur' in model_name:
+        from ftdinosaur_inference.ftdinosaur_inference import build_dinosaur
+        from ftdinosaur_inference.ftdinosaur_inference.utils import resize_patches_to_image, build_preprocessing, soft_masks_to_one_hot
+
+        dino_model_name = "dinosaur_base_patch14_518_topk3.coco_dv2_ft_s7_300k+10k"
+        vision_tower = build_dinosaur.build(dino_model_name)
+        vision_tower = vision_tower.to(torch.float32).cuda()
+        vision_tower.eval()
+        vision_tower.requires_grad_(False)
 
    
     return vision_tower
@@ -155,7 +165,8 @@ def infer_model_type(model_name: str) -> str:
         "space",
         "monet-big-decoder",
         "slot-attention-big-decoder",
-        "dinov2"
+        "dinov2",
+        "ft-dinosaur"
     ]:
         return "object-centric"
     raise ValueError(f"Could not infer model type for model '{model_name}'")

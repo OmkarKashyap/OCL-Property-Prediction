@@ -188,12 +188,29 @@ class DownstreamPredictionStep(DownstreamStep):
                         all_reprs.append(obj_feats)
 
                     slots_out = torch.stack(all_reprs).to(self.device) #torch.Size([256, 12, 768])
+                    masks_out = patch_masks
+                    reconstructions_out = None
 
-                output = {
-                    'reconstruction': slots_out,
-                    'slots': slots_out,
-                    'mask': patch_masks,
-                }
+                elif 'ft-dinosaur' in model_name:
+                    outp = self.model(x, decode=False, num_slots=7) 
+                    reconstructions_out = outp['features']
+                    slots_out =  outp['slots']
+                    masks_out = outp['slot_masks']
+                    init = outp['slot_init']
+
+                if reconstructions_out is None:
+                    output = {
+                        'reconstruction': slots_out,
+                        'slots': slots_out,
+                        'mask': masks_out,
+                    }
+                else:
+                    output = {
+                        'reconstruction': reconstructions_out,
+                        'slots': slots_out,
+                        'mask': masks_out,
+                    }
+
                 to_save = dict(representation=output["slots"])
                 if self.matching == "mask":
                     to_save["mask"] = mask

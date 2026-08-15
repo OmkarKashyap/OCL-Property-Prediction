@@ -37,6 +37,40 @@ In `train_config.yaml`, set `model_name` to `"dinov2"`:
 model_name: "dinov2"
 ```
 
+### 2. FT-DINOSAUR
+
+To load and configure the Ft-DINOSAUR module for inference:
+
+1. Clone the repository and rename it:
+
+```bash
+git clone https://github.com/rw-ocrl/ftdinosaur-inference.git
+rename to ftdinosaur_inference
+```
+
+Update the import paths in the respective files:
+
+ftdinosaur_inference/ftdinosaur_inference/build_dinosaur.py: 
+```python
+from ftdinosaur_inference.ftdinosaur_inference import utils
+from ftdinosaur_inference.ftdinosaur_inference.modules import dinosaur
+```
+
+ftdinosaur_inference/ftdinosaur_inference/modules/dinosaur.py
+
+```python
+from ftdinosaur_inference.ftdinosaur_inference.modules import vit
+from ftdinosaur_inference.ftdinosaur_inference.modules.decoding import PatchDecoder
+from ftdinosaur_inference.ftdinosaur_inference.modules.helpers import build_mlp, build_two_layer_mlp
+from ftdinosaur_inference.ftdinosaur_inference.modules.slot_attention import RandomSlotInitialization,SlotAttentionGrouping
+```
+
+In `train_config.yaml`, set `model_name` to `"ft-dinosaur"`:
+
+```yaml
+model_name: "ft-dinosaur"
+```
+
 
 ## Dataset Setup
 

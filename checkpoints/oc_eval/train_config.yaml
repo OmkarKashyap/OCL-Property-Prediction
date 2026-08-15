@@ -3,7 +3,7 @@ dataset:
   name: "coco"
   variant: null
 model:
-  name: "dinov2"
+  name: "ft-dinosaur"
   num_slots: 7
   encoder: "dinov2-vitb-14"
   resize_to: [336, 336]
