@@ -32,6 +32,7 @@ class DownstreamStep:
     features_size: int
     optimizer: Optional[torch.optim.Optimizer] = None
     use_cache: bool = False
+    config: Optional[Any] = None
 
     training: bool = field(default=True, init=False)
 
@@ -98,7 +99,7 @@ class DownstreamStep:
 
         # Forward pass
         batch = self._preprocess(batch)
-        out = self._predict(batch["image"], batch["sample_id"])
+        out = self._predict(batch["image"], batch["sample_id"], batch['mask'], self.config)
 
         # Main part of prediction step.
         out = self._internal_call(batch, out)

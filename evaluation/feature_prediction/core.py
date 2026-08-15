@@ -29,6 +29,29 @@ from utils.slot_matching import (
 from .loss import DownstreamLoss, get_loss_fn
 from .models import DownstreamPredictionModel
 
+# sklearn.metrics.top_k_accuracy_score 
+def topk_accuracy_per_class(y_true, y_pred_logits, k=1):
+    """
+    y_true: (N,) integer labels
+    y_pred_logits: (N, C) logits or probabilities
+    """
+    num_classes = y_pred_logits.shape[1]
+    topk = np.argsort(-y_pred_logits, axis=1)[:, :k]
+
+    per_class_acc = []
+
+    for c in range(num_classes):
+        idx = (y_true == c)
+        if idx.sum() == 0:
+            continue
+
+        correct = np.any(topk[idx] == c, axis=1)
+        per_class_acc.append(correct.mean())
+
+    if len(per_class_acc) == 0:
+        return None
+
+    return np.mean(per_class_acc)
 
 def _get_ordered_objects(data: Tensor, indices: Tensor) -> Tensor:
     # Use index broadcasting. The first indexing tensor has shape (B, 1),
@@ -51,7 +74,8 @@ def _get_metric_for_feature(
     if feature.type == "numerical":
         return partial(_safe_metric, metric=r2_score), "r2"
     elif feature.type == "categorical":
-        return partial(_safe_metric, metric=accuracy_score), "accuracy"
+        # return partial(_safe_metric, metric=accuracy_score), "accuracy"
+        return None, "topk"
 
 
 # modified_objects:
@@ -75,6 +99,7 @@ class DownstreamPredictionStep(DownstreamStep):
     ignore_mode: Optional[IgnoreModeType] = None
     ignored_features: Optional[List[str]] = None
     loss_function: DownstreamLoss = None
+    config: Any = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -82,29 +107,105 @@ class DownstreamPredictionStep(DownstreamStep):
             self.ignored_features = []
 
     def _preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
-        for name in ["image", "y_true", "is_foreground", "is_modified"]:
+        for name in ["image", "y_true", "is_foreground", "is_modified", "mask"]:
             batch[name] = batch[name].to(self.device, non_blocking=True)
         return batch
 
-    def _predict(self, x: Tensor, idxs: Tensor) -> Dict[str, Any]:
+    def _predict(self, x: Tensor, idxs: Tensor, mask, config) -> Dict[str, Any]:
         with torch.no_grad():
             # The output is on cpu because the cache is on cpu.
             output = self._get_cached_representation(idxs)
             if output is None:
                 # Forward pass through encoder (without grad).
-                output = self.model(x)
-                to_save = dict(representation=output["representation"])
+                # output = self.model(x)
+                # to_save = dict(representation=output["representation"])
+                # if self.matching == "mask":
+                #     to_save["mask"] = output["mask"]
+                # self._save_to_cache(idxs, to_save)
+
+                img_tensor_list = []
+                img_pil_list = []
+                x = x.float()
+                model_name = config.model.name
+
+                if "dinov2" in model_name.lower():
+                    def feature_select(image_forward_outs):
+                        image_features = image_forward_outs.hidden_states[-2]
+                        image_features = image_features[:, 1:]  # remove CLS
+                        return image_features
+
+                    image_forward_outs = self.model(x, output_hidden_states=True)
+                    image_features = feature_select(image_forward_outs).to(x.dtype)
+
+                    B, N, D = image_features.shape #torch.Size([256, 576, 768]) 
+                    B, K, C, H_in, W_in = mask.shape #torch.Size([256, 6, 1, 336, 336]) 
+                    H = W = int(N ** 0.5)
+
+                    mask_ids = mask.view(B * K, C, H_in, W_in) #torch.Size([1536, 1, 336, 336])
+                    patch_masks = torch.nn.functional.interpolate(
+                        mask_ids.float(),
+                        size=(H, W),
+                        mode="nearest"
+                    ).long() #torch.Size([1536, 1, 24, 24]) 
+                    patch_masks = patch_masks.view(B, K, H, W)  #torch.Size([256, 6, 24, 24])
+
+                    all_reprs = []
+                    for b in range(B):
+                        feats_b = image_features[b]   #torch.Size([576, 768])
+                        masks_bk = patch_masks[b]   #torch.Size([6, 24, 24]) 
+            
+                        obj_feats = []
+                        for k in range(K):
+                            mk = masks_bk[k] #torch.Size([24, 24]) 
+                            
+                            obj_ids = torch.unique(mk) #tensor([0, 1], device='cuda:0')
+                            obj_ids = obj_ids[obj_ids > 0] #tensor([1], device='cuda:0')
+
+                            for oid in obj_ids:
+                                coords = (mk == oid).nonzero(as_tuple=False)  # [num_pixels, 2]
+
+                                if coords.shape[0] == 0:
+                                    continue
+
+                                idxs_obj = coords[:, 0] * W + coords[:, 1]  #torch.Size([35])
+
+                                if len(idxs_obj) >= 2:
+                                    perm = torch.randperm(len(idxs_obj), device=idxs_obj.device)
+                                    chosen = idxs_obj[perm[:2]]
+                                else:
+                                    chosen = idxs_obj.repeat(2)[:2]
+
+                                # print('CHOSEN', chosen) #CHOSEN tensor([267, 333], device='cuda:0') 
+                                obj_feats.append(feats_b[chosen]) #torch.Size([2, 768]) 
+
+                        while len(obj_feats) < 6:
+                            rand_idx = torch.randint(0, N, (2,))
+                            obj_feats.append(feats_b[rand_idx])
+
+                        obj_feats = obj_feats[:6]
+                        obj_feats = torch.cat(obj_feats, dim=0)
+
+                        all_reprs.append(obj_feats)
+
+                    slots_out = torch.stack(all_reprs).to(self.device) #torch.Size([256, 12, 768])
+
+                output = {
+                    'reconstruction': slots_out,
+                    'slots': slots_out,
+                    'mask': patch_masks,
+                }
+                to_save = dict(representation=output["slots"])
                 if self.matching == "mask":
-                    to_save["mask"] = output["mask"]
-                self._save_to_cache(idxs, to_save)
+                    to_save["mask"] = mask
+                self._save_to_cache(idxs, output)
 
             # Representation shape: (B, num slots, latent dim) for OC models, (B, num slots * latent dim) for VAEs.
-            representation = output["representation"].detach().to(self.device)
-
-            if self.matching == "mask":
-                mask = output["mask"].detach().to(self.device)
-            else:
-                mask = None
+            representation = output["slots"].detach().to(self.device)
+            mask = output["mask"].detach().to(self.device)
+            # if self.matching == "mask":
+            #     mask = output["mask"].detach().to(self.device)
+            # else:
+            #     mask = None
 
         # Forward pass through downstream model.
         # y_pred shape: (B, num slots, feature dim) for OC models, (B, num slots * feature dim) for VAEs.
@@ -209,6 +310,7 @@ class DownstreamPredictionStep(DownstreamStep):
         # By default, all foreground objects are selected, and nothing else.
         # When matching, unselected objects have a high cost in the cost matrix.
         batch["is_selected"] = batch["is_foreground"]
+        mask = out["mask_pred"]
 
         if self.ignore_mode == "modified_objects":
             # Compute loss as usual.
@@ -415,6 +517,7 @@ def train(
     ignore_mode: Optional[IgnoreModeType] = None,
     ignored_features: Optional[List[str]] = None,
     use_cache: bool = True,
+    config = None
 ) -> int:
     assert (
         matching == "loss"
@@ -431,13 +534,14 @@ def train(
         downstream_model=downstream_model,
         loss_function=get_loss_fn(features_info=dataset.downstream_metadata),
         device=device,
-        num_slots=model.num_slots,
+        num_slots=7,
         features_size=dataset.features_size,
         matching=matching,
         optimizer=optimizer,
         use_cache=use_cache,
         ignore_mode=ignore_mode,
         ignored_features=ignored_features,
+        config = config
     )
     checkpoint_path = checkpoint_dir / f"checkpoint-{downstream_model.identifier}.pt"
     train_engine = Engine(downstream_step)
@@ -477,6 +581,34 @@ def train(
             validation_engine.run(validation_dataloader, max_epochs=1)
             downstream_step.train()
         downstream_model.train()
+
+    @train_engine.on(Events.ITERATION_COMPLETED(every=validation_every*5))
+    def run_full_evaluation(engine):
+        logging.info("Running FULL evaluation (metrics)")
+
+        downstream_model.eval()
+        with torch.no_grad():
+            eval_results = evaluate(
+                model=model,
+                dataloader=validation_dataloader,   
+                downstream_model=downstream_model,
+                device=device,
+                matching=matching,
+                model_type=model_type,
+                ignore_mode=ignore_mode,
+                ignored_features=ignored_features,
+                config = config 
+            )
+
+        # Log results
+        for r in eval_results:
+            logging.info(
+                f"[Eval] {r['feature_name']} | {r['metric_name']} | "
+                f"{r['object_filter']} = {r['metric_value']}"
+            )
+
+        downstream_model.train()
+
 
     all_losses = []
 
@@ -534,6 +666,7 @@ def evaluate(
     model_type: str,
     ignore_mode: Optional[IgnoreModeType] = None,
     ignored_features: Optional[List[str]] = None,
+    config = None
 ) -> List[Dict[str, Any]]:
     dataset: MultiObjectDataset = dataloader.dataset  # type: ignore
     supervised_metadata = dataset.downstream_metadata
@@ -547,11 +680,12 @@ def evaluate(
         downstream_model=downstream_model,
         loss_function=get_loss_fn(features_info=dataset.downstream_metadata),
         device=device,
-        num_slots=model.num_slots,
+        num_slots=7,
         features_size=dataset.features_size,
         matching=matching,
         ignore_mode=ignore_mode,
         ignored_features=ignored_features,
+        config = config
     )
     step.eval()
 
@@ -605,18 +739,75 @@ def evaluate(
         metric, metric_name = _get_metric_for_feature(feature)
         y_true = results["y_true"][:, :, feature.slice]
         y_pred = results["y_pred"][:, :, feature.slice]
-        if feature.type == "categorical":
-            y_true = y_true.argmax(axis=2)
-            y_pred = y_pred.argmax(axis=2)
+        # if feature.type == "categorical":
+        #     y_true = y_true.argmax(axis=2)
+        #     y_pred = y_pred.argmax(axis=2)
+        # for mask_name, mask in masks.items():
+        #     eval_results.append(
+        #         {
+        #             "object_filter": mask_name,
+        #             "feature_name": feature.name,
+        #             "metric_name": metric_name,
+        #             "metric_value": metric(y_true[mask], y_pred[mask]),
+        #         }
+        #     )
+
         for mask_name, mask in masks.items():
-            eval_results.append(
-                {
+            if feature.type == "categorical":
+                y_true_cls = y_true.argmax(axis=2)          # (N,) 
+                y_pred_logits = y_pred                      # (N, C)
+
+                y_true_masked = y_true_cls[mask]
+                y_pred_masked = y_pred_logits[mask]
+
+                top1 = topk_accuracy_per_class(y_true_masked, y_pred_masked, k=1)
+                top5 = topk_accuracy_per_class(y_true_masked, y_pred_masked, k=5)
+
+                eval_results.append({
                     "object_filter": mask_name,
                     "feature_name": feature.name,
-                    "metric_name": metric_name,
-                    "metric_value": metric(y_true[mask], y_pred[mask]),
-                }
-            )
+                    "metric_name": "top1_acc",
+                    "metric_value": top1,
+                })
+
+                eval_results.append({
+                    "object_filter": mask_name,
+                    "feature_name": feature.name,
+                    "metric_name": "top5_acc",
+                    "metric_value": top5,
+                })
+
+            elif feature.type == "numerical":
+                # assume coords are (x, y)
+                y_true_masked = y_true[mask]
+                y_pred_masked = y_pred[mask]
+
+                r2_x = _safe_metric(
+                    y_true_masked[:, 0],
+                    y_pred_masked[:, 0],
+                    r2_score
+                )
+
+                r2_y = _safe_metric(
+                    y_true_masked[:, 1],
+                    y_pred_masked[:, 1],
+                    r2_score
+                )
+
+                eval_results.append({
+                    "object_filter": mask_name,
+                    "feature_name": f"{feature.name}_x",
+                    "metric_name": "r2",
+                    "metric_value": r2_x,
+                })
+
+                eval_results.append({
+                    "object_filter": mask_name,
+                    "feature_name": f"{feature.name}_y",
+                    "metric_name": "r2",
+                    "metric_value": r2_y,
+                })
+
     logging.info("Finished computing metrics.")
     downstream_model.train()
     return eval_results

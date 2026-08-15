@@ -1,0 +1,13 @@
+# train_config.yaml
+dataset:
+  name: "coco"
+  variant: null
+model:
+  name: "dinov2"
+  num_slots: 7
+  encoder: "dinov2-vitb-14"
+  resize_to: [336, 336]
+  patch_size: 14
+  token_num: 256
+device: "cuda"
+uuid: "ft-dino-test-001"

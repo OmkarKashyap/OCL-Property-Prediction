@@ -12,6 +12,17 @@ from torch.utils.data import DataLoader
 
 from models.base_model import BaseModel
 
+import argparse
+import os
+import torch.nn.functional as F
+import torch.distributed as dist
+import sys
+from torchvision import transforms
+import numpy as np
+# from models.dinosaur_model import DINOSAURpp, Visual_Encoder
+# import sys
+# sys.path.insert(0, '/home/sravanti/.cache/torch/hub/facebookresearch_dino_main')
+
 
 @dataclass
 class ForwardPass:
@@ -111,15 +122,27 @@ def load_model(
     config: DictConfig, checkpoint_path: Union[Path, str], model_args: dict = None
 ) -> BaseModel:
     """Instantiates model from config and loads it from checkpoint."""
-    if model_args is None:
-        model_args = {}
-    model: BaseModel = hydra.utils.instantiate(config.model, **model_args)
-    model.to(config.device)
-    if isinstance(checkpoint_path, str):
-        checkpoint_path = Path(checkpoint_path)
-    model_path = checkpoint_path / "model.pt"
-    model.load_state_dict(torch.load(model_path, config.device))
-    return model
+    # if model_args is None:
+    #     model_args = {}
+    # model: BaseModel = hydra.utils.instantiate(config.model, **model_args)
+    # model.to(config.device)
+    # if isinstance(checkpoint_path, str):
+    #     checkpoint_path = Path(checkpoint_path)
+    # model_path = checkpoint_path / "model.pt"
+    # model.load_state_dict(torch.load(model_path, config.device))
+
+    model_name  = config.model.name
+    
+    if 'dinov2' in model_name:  #For dinov2 gt masks
+        from transformers import AutoImageProcessor, AutoModel, AutoConfig
+        vision_tower = AutoModel.from_pretrained('facebook/dinov2-base')
+        vision_tower = vision_tower.cuda().eval()
+        vision_tower.requires_grad_(False)
+
+   
+    return vision_tower
+
+    
 
 
 def infer_model_type(model_name: str) -> str:
@@ -132,6 +155,7 @@ def infer_model_type(model_name: str) -> str:
         "space",
         "monet-big-decoder",
         "slot-attention-big-decoder",
+        "dinov2"
     ]:
         return "object-centric"
     raise ValueError(f"Could not infer model type for model '{model_name}'")

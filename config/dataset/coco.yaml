@@ -1,0 +1,22 @@
+# @package _global_
+
+dataset:
+  _target_: data.datasets.COCOSlotDataset
+  dataset_path: /data/omkar/UnSAM-ours/DETECTRON2_DATASETS/coco
+  width: 336
+  height: 336   
+  num_background_objects: 1
+  max_num_objects: 6
+  name: coco
+  input_channels: 3
+
+  # dataset_transform: crop
+
+  downstream_features:
+    - class
+    - coords
+
+data_sizes:
+  - 20000
+  - 1000
+  - 4952

@@ -29,6 +29,7 @@ def make_downstream_model(
     upstream_model: BaseModel,
     downstream_model_type: str,
     features_size: int,
+    config,
 ) -> DownstreamPredictionModel:
     """Creates and returns a downstream model with the given specifications.
 
@@ -41,9 +42,15 @@ def make_downstream_model(
     Returns:
         A downstream prediction model.
     """
+    # latent_size_per_slot = upstream_model.slot_size
+    # model_type = infer_model_type(upstream_model.name)
 
-    latent_size_per_slot = upstream_model.slot_size
-    model_type = infer_model_type(upstream_model.name)
+    model_name  = config.model.name
+
+    if 'dinov2' in model_name:
+        latent_size_per_slot = 768 
+        model_type = "object-centric"
+    
     if model_type == "object-centric":
         input_size = latent_size_per_slot
         output_size = features_size

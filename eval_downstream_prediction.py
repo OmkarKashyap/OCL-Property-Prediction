@@ -180,6 +180,7 @@ def main(config: DictConfig):
                 "downstream_features": dataset_config.dataset.downstream_features,
                 "output_features": config.output_features,
             },
+            split="train",
         )
         train_modified_features = train_dataset.dataset_transform_op.modified_features
         logging.debug(f"Features modified by this transform: {train_modified_features}")
@@ -209,6 +210,7 @@ def main(config: DictConfig):
                     "downstream_features": dataset_config.dataset.downstream_features,
                     "output_features": config.output_features,
                 },
+                split="train",
             ),
             batch_size=config.batch_size,
             shuffle=False,
@@ -240,6 +242,7 @@ def main(config: DictConfig):
             upstream_model=model,
             downstream_model_type=config.downstream_model,
             features_size=train_dataset.features_size,
+            config = checkpoint_config
         ).to(config.device)
         logging.info(f"Downstream model summary:\n{downstream_model}")
         summary_string, _ = summary_num_params(downstream_model, max_depth=4)
@@ -282,6 +285,7 @@ def main(config: DictConfig):
             ignore_mode=config.train_ignore_mode,
             ignored_features=train_dataset.dataset_transform_op.modified_features,
             use_cache=config.use_cache,
+            config = checkpoint_config
         )
         training_time = time.perf_counter() - time_start  # includes validation
         logging.info(f"Finished training ({steps_trained} iterations)")
@@ -313,7 +317,8 @@ def main(config: DictConfig):
             default_sizes = dataset_config.data_sizes  # data_sizes for chosen variant
             logging.info(f"Default data sizes for this variant: {default_sizes}.")
             # Skip train and validation sets used for the upstream model.
-            starting_index = default_sizes[0] + default_sizes[1]
+            # starting_index = default_sizes[0] + default_sizes[1]
+            starting_index=0
             if size is None:
                 size = default_sizes[2]  # Default: original test set size
             end_index = starting_index + size
@@ -332,6 +337,7 @@ def main(config: DictConfig):
                     "downstream_features": dataset_config.dataset.downstream_features,
                     "output_features": config.output_features,
                 },
+                split="val",
             )
             modified_features = test_dataset.dataset_transform_op.modified_features
             logging.debug(f"Features modified by this transform: '{modified_features}'")
@@ -367,6 +373,7 @@ def main(config: DictConfig):
                 model_type=model_type,
                 ignore_mode=config.test_ignore_mode,
                 ignored_features=modified_features,
+                config = checkpoint_config
             )
             eval_time = time.perf_counter() - time_start
 

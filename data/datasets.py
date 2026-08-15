@@ -24,6 +24,14 @@ from utils.utils import rename_dict_keys
 
 _DUMMY_DATA_SIZE = 10000
 
+import matplotlib.pyplot as plt
+import numpy as np
+import colorsys
+import h5py
+import numpy as np
+from pathlib import Path
+import json
+
 
 @dataclass
 class MultiObjectDataset(Dataset):
@@ -508,7 +516,7 @@ class Tetrominoes(MultiObjectDataset):
 
 
 def make_dataset(
-    dataset_config: DictConfig, starting_index: int, dataset_size: int, kwargs=None
+    dataset_config: DictConfig, starting_index: int, dataset_size: int, kwargs=None, split: str = "train",
 ) -> MultiObjectDataset:
     logging.info(
         f"Instantiating dataset with starting_index={starting_index} and size={dataset_size}."
@@ -520,6 +528,7 @@ def make_dataset(
         dataset_config,
         starting_index=starting_index,
         dataset_size=dataset_size,
+        split=split,
         **kwargs,
     )
 
@@ -567,6 +576,274 @@ def make_dataloaders(
         start += size
     return dataloaders
 
+import random
+import torch
+import numpy as np
+from pathlib import Path
+from PIL import Image
+from pycocotools.coco import COCO
+from typing import Tuple
+
+@dataclass
+class COCOSlotDataset(MultiObjectDataset):
+
+    split: str = "train"
+
+    def _load_data(self):
+        cache_path_train = Path("/data/omkar/object-centric-library/datasets") / "coco_slots_20000.h5"
+        cache_path_val = Path("/data/omkar/object-centric-library/datasets") / "coco_slots_val.h5"
+
+        if self.split == 'train' and cache_path_train.exists():
+            print(f'In data/datasets.py: In {self.split} and LOADING FROM CACHE {cache_path_train}')
+            data, metadata = self.load_from_h5(cache_path_train)
+            return data, metadata
+        elif self.split == 'train':
+            print(f'In data/datasets.py: In {self.split} and SAVING TO CACHE')
+            data, metadata = self._create_data()
+            self.save_to_h5(data, metadata, cache_path_train)
+
+        if self.split == 'val' and cache_path_val.exists():
+            print(f'In data/datasets.py: In {self.split} and LOADING FROM CACHE {cache_path_val}')
+            data, metadata = self.load_from_h5(cache_path_val)
+            return data, metadata
+        elif self.split == 'val':
+            print(f'In data/datasets.py: In {self.split} and SAVING TO CACHE')
+            data, metadata = self._create_data()
+            self.save_to_h5(data, metadata, cache_path_val)
+        return data, metadata
+
+        # data, metadata = self._create_data()
+        # return data, metadata
+        
+    def save_to_h5(self, data, metadata, path):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with h5py.File(path, "w") as f:
+            for k, v in data.items():
+                f.create_dataset(
+                    k,
+                    data=v,
+                    compression="gzip",
+                    dtype=v.dtype   
+                )
+
+            # convert numpy types → python types
+            def convert(obj):
+                if isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                if isinstance(obj, (np.float32, np.float64)):
+                    return float(obj)
+                if isinstance(obj, (np.int32, np.int64)):
+                    return int(obj)
+                return obj
+
+            metadata_clean = json.loads(json.dumps(metadata, default=convert))
+            f.attrs["metadata"] = json.dumps(metadata_clean)
+
+    def load_from_h5(self, path):
+        path = Path(path)
+
+        with h5py.File(path, "r") as f:
+            data = {
+                "image": f["image"][:],
+                "mask": f["mask"][:],
+                "class": f["class"][:],
+                "coords": f["coords"][:],
+                "visibility": f["visibility"][:],
+            }
+
+            metadata = json.loads(f.attrs["metadata"])
+
+        if "coords" in metadata:
+            if "mean" in metadata["coords"]:
+                metadata["coords"]["mean"] = np.array(metadata["coords"]["mean"], dtype=np.float32)
+            if "var" in metadata["coords"]:
+                metadata["coords"]["var"] = np.array(metadata["coords"]["var"], dtype=np.float32)
+
+        return data, metadata
+
+    def _create_data(self) -> Tuple[DataDict, MetadataDict]:
+
+        root = Path(self.dataset_path)
+        # ann_file = root / "annotations/instances_train2017.json"
+        # image_dir = root / "train2017"
+        if self.split == "train":
+            ann_file = root / "annotations/instances_train2017.json"
+            image_dir = root / "train2017"
+
+        elif self.split == "val":
+            ann_file = root / "annotations/instances_val2017.json"
+            image_dir = root / "val2017"
+
+        else:
+            raise ValueError(f"Unknown split: {self.split}")
+
+        coco = COCO(str(ann_file))
+        img_ids = list(coco.imgs.keys())
+        random.shuffle(img_ids)
+
+        images = []
+        masks_all = []
+        classes_all = []
+        coords_all = []
+        visibility_all = []
+
+        max_objects = self.max_num_objects
+        H, W = 336, 336
+        cat_ids = sorted(coco.getCatIds())
+        cat2idx = {c: i for i, c in enumerate(cat_ids)}
+        
+        selected_ids = img_ids[self.starting_index : self.starting_index + self.dataset_size]
+        for img_id in img_ids:
+
+            img_info = coco.loadImgs(img_id)[0]
+            ann_ids = coco.getAnnIds(imgIds=img_id)
+            anns = coco.loadAnns(ann_ids)
+
+            image = Image.open(image_dir / img_info["file_name"]).convert("RGB")
+            image = image.resize((336, 336))
+            image = np.array(image)
+
+            obj_masks = []
+            class_ids = []
+            areas = []
+            coords = []
+            for ann in anns:
+                m = coco.annToMask(ann)
+                m = Image.fromarray(m.astype(np.uint8))
+                m = m.resize((336, 336), resample=Image.NEAREST)
+                m = np.array(m)
+
+                area = m.sum()
+
+                if area == 0:
+                    continue
+
+                obj_masks.append(m)
+                areas.append(area)                
+                class_ids.append(cat2idx[ann["category_id"]])   
+
+            if len(obj_masks) == 0:
+                continue
+     
+            areas = np.array(areas)
+            topk = np.argsort(areas)[-max_objects:]
+            topk = topk[np.argsort(areas[topk])[::-1]]
+            
+            obj_masks = [obj_masks[i] for i in topk]
+            class_ids = [class_ids[i] for i in topk]
+
+            coords = []
+            for m in obj_masks:
+                ys, xs = np.where(m)
+                if len(xs) == 0:
+                    coords.append((0.0, 0.0))
+                else:
+                    coords.append((xs.mean() / W, ys.mean() / H))
+
+            N = len(obj_masks)
+
+            pad_masks = np.zeros((max_objects, H, W), dtype=np.float32)
+            pad_classes = np.zeros((max_objects,), dtype=np.int64)
+            pad_coords = np.zeros((max_objects, 2), dtype=np.float32)
+            pad_vis = np.zeros((max_objects,), dtype=np.float32)
+            
+            for i in range(N):
+                pad_masks[i] = obj_masks[i]
+                pad_classes[i] = class_ids[i]
+                pad_coords[i] = coords[i]
+                pad_vis[i] = 1.0
+            
+            instance_map = np.zeros((H, W), dtype=np.int32)
+            for i in range(N):
+                instance_map[obj_masks[i] > 0] = i  
+
+            images.append(np.array(image))
+            masks_all.append(instance_map)
+            classes_all.append(pad_classes)
+            coords_all.append(pad_coords)
+            visibility_all.append(pad_vis)
+
+            # self.visualize(image, obj_masks, coords, img_id)
+
+            if len(images) == 21000: #21000: #00:
+                break
+        
+        coords = np.array(coords_all)
+        coords_flat = coords.reshape(-1, 2)
+        coords_mean = coords_flat.mean(axis=0).astype(np.float32)
+        coords_var = coords_flat.var(axis=0).astype(np.float32)
+
+        masks = np.stack(masks_all)   # (B, H, W)
+        masks = masks[:, :, :, None] #(B,H,W,1)
+
+        data = {
+            "image": np.stack(images),                  # (B, H, W, 3) : (10, 336, 336, 3)
+            "mask": masks,               # (B, H, W,1) : (10, 336, 336, 1)
+            "class": np.stack(classes_all),            # (B, N) : (10, 6)
+            "coords": np.stack(coords_all),            # (B, N, 2) : (10, 6, 2)
+            "visibility": np.stack(visibility_all),    # (B, N) : (10, 6)
+        }
+
+        metadata = {
+            "self.dataset": {
+                "num_samples": len(images)
+            },
+            "class": {
+                "type": "categorical",
+                "num_categories": len(cat2idx),
+                "shape": (len(cat2idx),)
+            },
+            "coords": {
+                "type": "numerical",
+                "shape": (2,),
+                "mean": coords_mean,
+                "var": coords_var,
+            }
+        }
+
+        # self.save_to_h5(data, metadata, Path("/data/omkar/object-centric-library/datasets") / "coco_slots.h5")
+        return data, metadata
+    
+    def visualize(self, image, obj_masks, coords=None, img_id=None):
+        save_path=f"/data/omkar/object-centric-library/vis/{img_id}.png"
+
+        H, W, _ = image.shape
+
+        img = image.astype(np.float32) / 255.0
+        overlay = img.copy()
+
+        valid_masks = [m for m in obj_masks if m.sum() > 0]
+        num_objs = len(valid_masks)
+
+        for i, m in enumerate(obj_masks):
+            if m.sum() == 0:
+                continue
+
+            hue = i / max(1, num_objs)
+            r, g, b = colorsys.hsv_to_rgb(hue, 0.4, 1.0)
+            color = np.array([r, g, b])
+
+            m = m.astype(bool)
+            overlay[m] = overlay[m] * 0.7 + color * 0.5
+
+            if coords is not None:
+                x, y = coords[i]
+                cx, cy = int(x * W), int(y * H)
+
+                cx = np.clip(cx, 2, W - 3)
+                cy = np.clip(cy, 2, H - 3)
+
+                overlay[cy-2:cy+2, cx-2:cx+2] = [1.0, 1.0, 1.0]
+
+        plt.figure(figsize=(6, 6))
+        plt.imshow(overlay)
+        plt.axis('off')
+        plt.title(f"{num_objs} objects")
+
+        plt.savefig(save_path, bbox_inches='tight', pad_inches=0, dpi=200)
+        plt.close()
 
 def make_dataloader(
     dataset_config: DictConfig,
