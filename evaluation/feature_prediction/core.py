@@ -192,6 +192,14 @@ class DownstreamPredictionStep(DownstreamStep):
                     masks_out = patch_masks
                     reconstructions_out = slots_out
                 
+                if "dinosaur" in model_name.lower():
+                    features = self.model.vision_encoder(x.to(self.device))  
+                    reconstruction, slots_out, mask = self.model(features) 
+
+                    slots_out = slots_out
+                    masks_out = mask
+                    reconstructions_out = reconstruction
+
                 elif 'ft-dinosaur-patch-avg' in model_name:
                     def feature_select(image_forward_outs):
                         image_features = image_forward_outs.hidden_states[-2]
