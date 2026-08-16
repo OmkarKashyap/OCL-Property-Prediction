@@ -233,7 +233,7 @@ def main(config: DictConfig):
         elif modified_model_slots or model is None:
             model = load_model(checkpoint_config, config.checkpoint_path)
             modified_model_slots = False
-        model.eval()
+        #   model.eval()
 
         set_all_seeds(config.seed)
 

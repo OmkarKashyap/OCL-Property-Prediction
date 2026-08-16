@@ -138,6 +138,27 @@ def load_model(
         vision_tower = AutoModel.from_pretrained('facebook/dinov2-base')
         vision_tower = vision_tower.cuda().eval()
         vision_tower.requires_grad_(False)
+
+        return vision_tower
+    
+    if 'ft-dinosaur-patch-avg' in model_name:
+        import cv2
+        from transformers import AutoImageProcessor, AutoModel, AutoConfig
+
+        from ftdinosaur_inference.ftdinosaur_inference import build_dinosaur
+        from ftdinosaur_inference.ftdinosaur_inference.utils import resize_patches_to_image, build_preprocessing, soft_masks_to_one_hot
+
+        vision_tower = AutoModel.from_pretrained('facebook/dinov2-base')
+        vision_tower = vision_tower.cuda().eval()
+        vision_tower.requires_grad_(False)
+
+        dino_model_name = "dinosaur_base_patch14_518_topk3.coco_dv2_ft_s7_300k+10k"
+        ftdino_model = build_dinosaur.build(dino_model_name)
+        ftdino_model = ftdino_model.to(torch.float32).cuda()
+        ftdino_model.eval()
+        ftdino_model.requires_grad_(False)
+
+        return (vision_tower, ftdino_model)
     
     if 'ft-dinosaur' in model_name:
         from ftdinosaur_inference.ftdinosaur_inference import build_dinosaur
@@ -149,11 +170,7 @@ def load_model(
         vision_tower.eval()
         vision_tower.requires_grad_(False)
 
-   
-    return vision_tower
-
-    
-
+        return vision_tower
 
 def infer_model_type(model_name: str) -> str:
     if model_name.startswith("baseline_vae"):
@@ -166,7 +183,8 @@ def infer_model_type(model_name: str) -> str:
         "monet-big-decoder",
         "slot-attention-big-decoder",
         "dinov2",
-        "ft-dinosaur"
+        "ft-dinosaur",
+        "ft-dinosaur-patch-avg"
     ]:
         return "object-centric"
     raise ValueError(f"Could not infer model type for model '{model_name}'")

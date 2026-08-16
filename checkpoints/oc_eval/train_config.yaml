@@ -3,11 +3,11 @@ dataset:
   name: "coco"
   variant: null
 model:
-  name: "ft-dinosaur"
+  name: "ft-dinosaur-patch-avg"
   num_slots: 7
   encoder: "dinov2-vitb-14"
   resize_to: [336, 336]
   patch_size: 14
   token_num: 256
 device: "cuda"
-uuid: "ft-dino-test-001"
+uuid: "ft-dino-test-001" 

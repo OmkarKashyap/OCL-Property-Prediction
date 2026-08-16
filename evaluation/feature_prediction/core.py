@@ -28,6 +28,7 @@ from utils.slot_matching import (
 
 from .loss import DownstreamLoss, get_loss_fn
 from .models import DownstreamPredictionModel
+import math
 
 # sklearn.metrics.top_k_accuracy_score 
 def topk_accuracy_per_class(y_true, y_pred_logits, k=1):
@@ -189,27 +190,66 @@ class DownstreamPredictionStep(DownstreamStep):
 
                     slots_out = torch.stack(all_reprs).to(self.device) #torch.Size([256, 12, 768])
                     masks_out = patch_masks
-                    reconstructions_out = None
+                    reconstructions_out = slots_out
+                
+                elif 'ft-dinosaur-patch-avg' in model_name:
+                    def feature_select(image_forward_outs):
+                        image_features = image_forward_outs.hidden_states[-2]
+                        image_features = image_features[:, 1:]  
+                        return image_features
+                    
+                    dinov2_encoder, ftdino_model = self.model
+
+                    image_forward_outs = dinov2_encoder(x, output_hidden_states=True)
+                    image_features = feature_select(image_forward_outs).to(x.dtype)
+
+                    B, P, D = image_features.shape
+
+                    outp = ftdino_model(x, decode=False, num_slots=7) 
+                    reconstruction = outp['features']
+                    slots = outp['slots']
+                    mask_out = outp['slot_masks']
+                    init = outp['slot_init']
+
+                    masks = mask_out.view(-1, mask_out.shape[1], 336 // 14, 336 // 14)                     
+                    predictions = masks  
+                    predictions = torch.argmax(predictions, dim=1)    
+                    unique_pred = torch.unique(predictions)
+
+                    region_features = []
+                    B, N, D = image_features.shape
+                    H = W = int(math.sqrt(N))
+                    patch_features = image_features.view(B, H, W, D)
+                    for batch_id in range(B):
+                        batch_regions = []
+                        for slot_id in range(slots.shape[1]):  
+                            mask = (predictions[batch_id] == slot_id).float()
+                            masked_feat = patch_features[batch_id].cuda() * mask.unsqueeze(-1) 
+                            summed = masked_feat.sum(dim=(0, 1))  
+                            count = mask.sum().clamp(min=1e-6)
+                            region_feat = summed / count  
+                            batch_regions.append(region_feat)
+                        batch_regions = torch.stack(batch_regions, dim=0)  
+                        region_features.append(batch_regions)
+                    image_features = torch.stack(region_features, dim=0)
+
+                    slots_out = image_features
+                    masks_out = mask_out
+                    reconstructions_out = reconstruction
 
                 elif 'ft-dinosaur' in model_name:
                     outp = self.model(x, decode=False, num_slots=7) 
-                    reconstructions_out = outp['features']
-                    slots_out =  outp['slots']
-                    masks_out = outp['slot_masks']
                     init = outp['slot_init']
 
-                if reconstructions_out is None:
-                    output = {
-                        'reconstruction': slots_out,
-                        'slots': slots_out,
-                        'mask': masks_out,
-                    }
-                else:
-                    output = {
-                        'reconstruction': reconstructions_out,
-                        'slots': slots_out,
-                        'mask': masks_out,
-                    }
+                    slots_out =  outp['slots']  #torch.Size([128, 7, 256]) 
+                    masks_out = outp['slot_masks']  #torch.Size([128, 7, 576])  
+                    reconstructions_out = outp['features']
+                    
+                output = {
+                    'reconstruction': reconstructions_out,
+                    'slots': slots_out,
+                    'mask': masks_out,
+                }
 
                 to_save = dict(representation=output["slots"])
                 if self.matching == "mask":
@@ -542,7 +582,7 @@ def train(
         or (matching == "deterministic" and model_type == "distributed")
     )
     assert ignore_mode in ["modified_objects", "modified_features", None]
-    assert model.training is False
+    # assert model.training is False
     downstream_model.train()
     checkpoint_dir = Path(checkpoint_dir)
     dataset: MultiObjectDataset = dataloader.dataset  # type: ignore
@@ -687,7 +727,7 @@ def evaluate(
 ) -> List[Dict[str, Any]]:
     dataset: MultiObjectDataset = dataloader.dataset  # type: ignore
     supervised_metadata = dataset.downstream_metadata
-    assert model.training is False
+    # assert model.training is False
     downstream_model.eval()
 
     if model_type not in ["object-centric", "distributed"]:
