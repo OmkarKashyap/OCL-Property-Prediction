@@ -191,14 +191,6 @@ class DownstreamPredictionStep(DownstreamStep):
                     slots_out = torch.stack(all_reprs).to(self.device) #torch.Size([256, 12, 768])
                     masks_out = patch_masks
                     reconstructions_out = slots_out
-                
-                if "dinosaur" in model_name.lower():
-                    features = self.model.vision_encoder(x.to(self.device))  
-                    reconstruction, slots_out, mask = self.model(features) 
-
-                    slots_out = slots_out
-                    masks_out = mask
-                    reconstructions_out = reconstruction
 
                 elif 'ft-dinosaur-patch-avg' in model_name:
                     def feature_select(image_forward_outs):
@@ -252,7 +244,64 @@ class DownstreamPredictionStep(DownstreamStep):
                     slots_out =  outp['slots']  #torch.Size([128, 7, 256]) 
                     masks_out = outp['slot_masks']  #torch.Size([128, 7, 576])  
                     reconstructions_out = outp['features']
+                
+                elif "dinosaur-patch-avg" in model_name.lower():
+                    def feature_select(image_forward_outs):
+                        image_features = image_forward_outs.hidden_states[-2]
+                        image_features = image_features[:, 1:]  # remove CLS
+                        return image_features
                     
+                    dinov2_model, vision_tower = self.model
+
+                    image_forward_outs = dinov2_model(x, output_hidden_states=True)
+                    image_features = feature_select(image_forward_outs).to(x.dtype)
+                    features = image_features
+                    B, P, D = image_features.shape
+
+                    dinosaur_features = vision_tower.vision_encoder(x.to(self.device)) 
+
+                    ### Masking
+                    ps = 14    
+                    reconstruction, slots, masks = vision_tower(dinosaur_features)
+
+
+                    mask_out = masks  
+                    masks = masks.view(-1, masks.shape[1], 336 // ps, 336 // ps)                
+                    predictions = masks 
+                    predictions = torch.argmax(predictions, dim=1) #torch.Size([128, 24, 24])
+
+                    ## averaging
+                    region_features = []
+                    B, N, D = features.shape
+                    H = W = int(math.sqrt(N))
+                    patch_features = features.view(B, H, W, D)
+                    for batch_id in range(B):
+                        batch_regions = []
+                        for slot_id in range(slots.shape[1]):  # 7
+                            mask = (predictions[batch_id] == slot_id).float()  # [24, 24]
+                            masked_feat = patch_features[batch_id] * mask.unsqueeze(-1)  #torch.Size([24, 24, 768])
+                            summed = masked_feat.sum(dim=(0, 1))  
+                            count = mask.sum().clamp(min=1e-6)
+                            region_feat = summed / count #torch.Size([768]) 
+                            batch_regions.append(region_feat)
+                        batch_regions = torch.stack(batch_regions, dim=0)  
+                        region_features.append(batch_regions)
+
+                    slots_out = torch.stack(region_features, dim=0) #torch.Size([128, 7, 768]) 
+
+                    slots_out = slots_out
+                    masks_out = mask_out
+                    reconstructions_out = reconstruction
+                
+                elif "dinosaur" in model_name.lower():
+                    features = self.model.vision_encoder(x.to(self.device))  
+                    reconstruction, slots_out, mask = self.model(features) 
+
+                    slots_out = slots_out
+                    masks_out = mask
+                    reconstructions_out = reconstruction
+
+                                    
                 output = {
                     'reconstruction': reconstructions_out,
                     'slots': slots_out,

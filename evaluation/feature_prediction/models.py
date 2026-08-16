@@ -46,13 +46,11 @@ def make_downstream_model(
     # model_type = infer_model_type(upstream_model.name)
 
     model_name  = config.model.name
-    if 'dinosaur' in model_name:
-        latent_size_per_slot = 768
     if 'ft-dinosaur-patch-avg' in model_name:
         latent_size_per_slot = 768
     elif 'ft-dinosaur' in model_name:
         latent_size_per_slot = 256
-    elif 'dinov2' in model_name:
+    elif 'dinov2' in model_name or 'dinosaur-patch-avg' in model_name or 'dinosaur' in model_name:
         latent_size_per_slot = 768
 
     model_type = "object-centric"

@@ -105,12 +105,24 @@ In `train_config.yaml`, set `model_name` to `"ft-dinosaur-patch-avg"`:
 model_name: "ft-dinosaur-patch-avg"
 ```
 
-### 4. DINSOAUR
+### 4. DINOSAUR
+
+Add the dinosaur model path in `get_parser()` in `models/utils.py`
 
 In `train_config.yaml`, set `model_name` to `"dinosaur"`:
 
 ```yaml
 model_name: "dinosaur"
+```
+
+### 5. DINOSAUR-Patch-Avg
+
+Add the dinosaur model path in `get_parser()` in `models/utils.py`
+
+In `train_config.yaml`, set `model_name` to `"dinosaur-patch-avg"`:
+
+```yaml
+model_name: "dinosaur-patch-avg"
 ```
 
 ## Dataset Setup

@@ -192,8 +192,77 @@ def load_model(
         vision_tower.requires_grad_(False)
 
         return vision_tower
+    
+    elif 'ft-dinosaur-patch-avg' in model_name:
+        import cv2
+        from transformers import AutoImageProcessor, AutoModel, AutoConfig
 
-    if 'dinosaur' in model_name: 
+        from ftdinosaur_inference.ftdinosaur_inference import build_dinosaur
+        from ftdinosaur_inference.ftdinosaur_inference.utils import resize_patches_to_image, build_preprocessing, soft_masks_to_one_hot
+
+        vision_tower = AutoModel.from_pretrained('facebook/dinov2-base')
+        vision_tower = vision_tower.cuda().eval()
+        vision_tower.requires_grad_(False)
+
+        dino_model_name = "dinosaur_base_patch14_518_topk3.coco_dv2_ft_s7_300k+10k"
+        ftdino_model = build_dinosaur.build(dino_model_name)
+        ftdino_model = ftdino_model.to(torch.float32).cuda()
+        ftdino_model.eval()
+        ftdino_model.requires_grad_(False)
+
+        return (vision_tower, ftdino_model)
+
+    elif 'ft-dinosaur' in model_name:
+        from ftdinosaur_inference.ftdinosaur_inference import build_dinosaur
+        from ftdinosaur_inference.ftdinosaur_inference.utils import resize_patches_to_image, build_preprocessing, soft_masks_to_one_hot
+
+        dino_model_name = "dinosaur_base_patch14_518_topk3.coco_dv2_ft_s7_300k+10k"
+        vision_tower = build_dinosaur.build(dino_model_name)
+        vision_tower = vision_tower.to(torch.float32).cuda()
+        vision_tower.eval()
+        vision_tower.requires_grad_(False)
+
+        return vision_tower
+
+    elif 'dinosaur-patch-avg' in model_name:
+        from transformers import AutoImageProcessor, AutoModel, AutoConfig
+
+        vision_tower = AutoModel.from_pretrained('facebook/dinov2-base')
+        vision_tower = vision_tower.cuda().eval()
+        vision_tower.requires_grad_(False)
+
+        args = get_parser().parse_args([])
+        # init_distributed_mode(self.args)
+        args.use_checkpoint = True
+        args.patch_size = int(args.encoder.split("-")[-1])
+        args.token_num = (args.resize_to[0] * args.resize_to[1]) // (args.patch_size ** 2)
+        args.gpus = 1
+
+        image_processor = transforms.Compose([transforms.Resize(336),
+                                transforms.CenterCrop(336),
+                                transforms.ToTensor(),
+                                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                            std=[0.229, 0.224, 0.225])])
+        
+        vision_encoder = Visual_Encoder(args).cuda()
+
+        # vision_encoder.load_state_dict('dinov2_ckpt')
+        dinosaur_model = DINOSAURpp(args, None).cuda()
+        dinosaur_model = torch.nn.parallel.DataParallel(dinosaur_model)
+        to_restore = {"epoch": 99}
+        restart_from_checkpoint(args, 
+                                run_variables=to_restore, 
+                                model=dinosaur_model)
+        dinosaur_model = dinosaur_model.module
+        dinosaur_model.vision_encoder = vision_encoder
+        dinosaur_model.eval()
+        vision_encoder.eval()
+        dinosaur_model.requires_grad_(False)
+        vision_encoder.requires_grad_(False)
+
+        return (vision_tower, dinosaur_model)
+
+    elif 'dinosaur' in model_name: 
         from transformers import AutoImageProcessor, AutoModel, AutoConfig
 
         args = get_parser().parse_args([])
@@ -225,37 +294,9 @@ def load_model(
         vision_tower.requires_grad_(False)
         vision_encoder.requires_grad_(False)
         return vision_tower
-    
-    if 'ft-dinosaur-patch-avg' in model_name:
-        import cv2
-        from transformers import AutoImageProcessor, AutoModel, AutoConfig
 
-        from ftdinosaur_inference.ftdinosaur_inference import build_dinosaur
-        from ftdinosaur_inference.ftdinosaur_inference.utils import resize_patches_to_image, build_preprocessing, soft_masks_to_one_hot
-
-        vision_tower = AutoModel.from_pretrained('facebook/dinov2-base')
-        vision_tower = vision_tower.cuda().eval()
-        vision_tower.requires_grad_(False)
-
-        dino_model_name = "dinosaur_base_patch14_518_topk3.coco_dv2_ft_s7_300k+10k"
-        ftdino_model = build_dinosaur.build(dino_model_name)
-        ftdino_model = ftdino_model.to(torch.float32).cuda()
-        ftdino_model.eval()
-        ftdino_model.requires_grad_(False)
-
-        return (vision_tower, ftdino_model)
-    
-    if 'ft-dinosaur' in model_name:
-        from ftdinosaur_inference.ftdinosaur_inference import build_dinosaur
-        from ftdinosaur_inference.ftdinosaur_inference.utils import resize_patches_to_image, build_preprocessing, soft_masks_to_one_hot
-
-        dino_model_name = "dinosaur_base_patch14_518_topk3.coco_dv2_ft_s7_300k+10k"
-        vision_tower = build_dinosaur.build(dino_model_name)
-        vision_tower = vision_tower.to(torch.float32).cuda()
-        vision_tower.eval()
-        vision_tower.requires_grad_(False)
-
-        return vision_tower
+    else:
+        raise ValueError(f"Unknown model name: {model_name}")
 
 def infer_model_type(model_name: str) -> str:
     if model_name.startswith("baseline_vae"):
@@ -271,6 +312,7 @@ def infer_model_type(model_name: str) -> str:
         "ft-dinosaur",
         "ft-dinosaur-patch-avg",
         "dinosaur",
+        "dinosaur-patch-avg",
     ]:
         return "object-centric"
     raise ValueError(f"Could not infer model type for model '{model_name}'")
