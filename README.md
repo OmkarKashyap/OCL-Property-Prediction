@@ -31,7 +31,7 @@ In `checkpoints/oc_eval/train_config.yaml`, change the model name to the desired
 
 ### 1. DINOv2
 
-In `train_config.yaml`, set `model_name` to `"dinov2"`:
+In ./checkpoints/oc_eval/train_config.yaml, set `model_name` to `"dinov2"`:
 
 ```yaml
 model_name: "dinov2"
@@ -50,13 +50,17 @@ rename to ftdinosaur_inference
 
 Update the import paths in the respective files:
 
-ftdinosaur_inference/ftdinosaur_inference/build_dinosaur.py: 
+You can replace ```ftdinosaur_inference``` with ```ftdinosaur_inference.ftdinosaur_inference``` in the following files ```ftdinosaur_inference/ftdinosaur_inference/build_dinosaur.py``` and ```ftdinosaur_inference/ftdinosaur_inference/modules/dinosaur.py```.
+
+Alternatively, you may edit these files:
+
+- ftdinosaur_inference/ftdinosaur_inference/build_dinosaur.py: 
 ```python
 from ftdinosaur_inference.ftdinosaur_inference import utils
 from ftdinosaur_inference.ftdinosaur_inference.modules import dinosaur
 ```
 
-ftdinosaur_inference/ftdinosaur_inference/modules/dinosaur.py
+- ftdinosaur_inference/ftdinosaur_inference/modules/dinosaur.py
 
 ```python
 from ftdinosaur_inference.ftdinosaur_inference.modules import vit
@@ -65,7 +69,7 @@ from ftdinosaur_inference.ftdinosaur_inference.modules.helpers import build_mlp,
 from ftdinosaur_inference.ftdinosaur_inference.modules.slot_attention import RandomSlotInitialization,SlotAttentionGrouping
 ```
 
-In `train_config.yaml`, set `model_name` to `"ft-dinosaur"`:
+In `./checkpoints/oc_eval/train_config.yaml`, set `model_name` to `"ft-dinosaur"`:
 
 ```yaml
 model_name: "ft-dinosaur"
@@ -99,7 +103,7 @@ from ftdinosaur_inference.ftdinosaur_inference.modules.helpers import build_mlp,
 from ftdinosaur_inference.ftdinosaur_inference.modules.slot_attention import RandomSlotInitialization,SlotAttentionGrouping
 ```
 
-In `train_config.yaml`, set `model_name` to `"ft-dinosaur-patch-avg"`:
+In ./checkpoints/oc_eval/train_config.yaml, set `model_name` to `"ft-dinosaur-patch-avg"`:
 
 ```yaml
 model_name: "ft-dinosaur-patch-avg"
@@ -109,7 +113,7 @@ model_name: "ft-dinosaur-patch-avg"
 
 Add the dinosaur model path in `get_parser()` in `models/utils.py`
 
-In `train_config.yaml`, set `model_name` to `"dinosaur"`:
+In ./checkpoints/oc_eval/train_config.yaml, set `model_name` to `"dinosaur"`:
 
 ```yaml
 model_name: "dinosaur"
@@ -119,7 +123,7 @@ model_name: "dinosaur"
 
 Add the dinosaur model path in `get_parser()` in `models/utils.py`
 
-In `train_config.yaml`, set `model_name` to `"dinosaur-patch-avg"`:
+In ./checkpoints/oc_eval/train_config.yaml, set `model_name` to `"dinosaur-patch-avg"`:
 
 ```yaml
 model_name: "dinosaur-patch-avg"
@@ -159,7 +163,7 @@ python eval_downstream_prediction.py downstream_model=linear checkpoint_path=/da
 # Changes done 
 ## Added
 
-- `train_config.yaml`
+- `./checkpoints/oc_eval/train_config.yaml`
 - `config/dataset/coco.yaml`
 - COCO dataset support in `data/datasets.py`
 
