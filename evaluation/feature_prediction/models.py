@@ -52,6 +52,8 @@ def make_downstream_model(
         latent_size_per_slot = 256
     elif 'dinov2' in model_name or 'dinosaur-patch-avg' in model_name or 'dinosaur' in model_name:
         latent_size_per_slot = 768
+    elif 'clip' in model_name.lower():
+        latent_size_per_slot = 1024
 
     model_type = "object-centric"
     if model_type == "object-centric":

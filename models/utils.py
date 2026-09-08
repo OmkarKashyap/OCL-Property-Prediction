@@ -164,6 +164,8 @@ def get_parser():
     parser.add_argument('--ISA', action="store_true", default = False)
     # parser.add_argument('--use_checkpoint', action="store_true")
     parser.add_argument('--checkpoint_path', type=str, default='/data/omkar/object-centric-library/checkpoints/ftdino_eval/checkpoint_epoch_99.pt')
+
+    # parser.add_argument('--checkpoint_path', type=str)
     # parser.add_argument('--validation_epoch', type=int, default=10)
     parser.add_argument('--seed', type=int, default=1234)
     # parser.add_argument('--model_save_path', type=str, required=True)
@@ -193,6 +195,22 @@ def load_model(
 
         return vision_tower
     
+    elif 'clip' in model_name.lower():
+        from transformers import CLIPVisionModel, CLIPImageProcessor
+
+        vision_tower = CLIPVisionModel.from_pretrained(
+            'openai/clip-vit-large-patch14-336'
+        )
+
+        image_processor = CLIPImageProcessor.from_pretrained(
+            'openai/clip-vit-large-patch14-336'
+        )
+
+        vision_tower = vision_tower.cuda().eval()
+        vision_tower.requires_grad_(False)
+
+        return vision_tower
+
     elif 'ft-dinosaur-patch-avg' in model_name:
         import cv2
         from transformers import AutoImageProcessor, AutoModel, AutoConfig
@@ -309,6 +327,7 @@ def infer_model_type(model_name: str) -> str:
         "monet-big-decoder",
         "slot-attention-big-decoder",
         "dinov2",
+        "clip",
         "ft-dinosaur",
         "ft-dinosaur-patch-avg",
         "dinosaur",

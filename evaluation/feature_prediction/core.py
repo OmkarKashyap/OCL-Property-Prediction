@@ -192,6 +192,164 @@ class DownstreamPredictionStep(DownstreamStep):
                     masks_out = patch_masks
                     reconstructions_out = slots_out
 
+                elif "clip" in model_name.lower():
+                    def feature_select(image_forward_outs):
+                        # CLIPVisionModel:
+                        # last_hidden_state = [B, 1 + num_patches, D]
+                        image_features = image_forward_outs.hidden_states[-2]
+
+                        # Remove CLS token
+                        image_features = image_features[:, 1:]
+
+                        return image_features
+
+                    image_forward_outs = self.model(
+                        x,
+                        output_hidden_states=True
+                    )
+
+                    image_features = feature_select(image_forward_outs).to(x.dtype)
+
+                    # ---------------------------------------------------------
+                    # image_features:
+                    # CLIP ViT-B/32 @ 224x224 -> [B, 49, 768]
+                    # ---------------------------------------------------------
+                    B, N, D = image_features.shape
+
+                    B_mask, K, C, H_in, W_in = mask.shape
+
+                    assert B == B_mask
+
+                    # CLIP patch grid
+                    H = W = int(N ** 0.5)
+
+                    assert H * W == N, \
+                        f"Number of CLIP patches ({N}) is not a square."
+
+                    # ---------------------------------------------------------
+                    # Resize masks to CLIP patch resolution
+                    # ---------------------------------------------------------
+                    mask_ids = mask.view(
+                        B * K,
+                        C,
+                        H_in,
+                        W_in
+                    )
+
+                    patch_masks = torch.nn.functional.interpolate(
+                        mask_ids.float(),
+                        size=(H, W),
+                        mode="nearest"
+                    ).long()
+
+                    # [B*K, 1, H, W] -> [B, K, H, W]
+                    patch_masks = patch_masks.view(
+                        B,
+                        K,
+                        H,
+                        W
+                    )
+
+                    # ---------------------------------------------------------
+                    # Sample 2 CLIP patch features per object
+                    # ---------------------------------------------------------
+                    all_reprs = []
+
+                    for b in range(B):
+
+                        # [N, D]
+                        feats_b = image_features[b]
+
+                        # [K, H, W]
+                        masks_bk = patch_masks[b]
+
+                        obj_feats = []
+
+                        for k in range(K):
+
+                            # [H, W]
+                            mk = masks_bk[k]
+
+                            # Find object IDs
+                            obj_ids = torch.unique(mk)
+                            obj_ids = obj_ids[obj_ids > 0]
+
+                            for oid in obj_ids:
+
+                                # [num_pixels, 2]
+                                coords = (mk == oid).nonzero(
+                                    as_tuple=False
+                                )
+
+                                if coords.shape[0] == 0:
+                                    continue
+
+                                # Convert (row, col) -> flattened patch index
+                                idxs_obj = (
+                                    coords[:, 0] * W +
+                                    coords[:, 1]
+                                )
+
+                                # Sample exactly 2 patches
+                                if len(idxs_obj) >= 2:
+
+                                    perm = torch.randperm(
+                                        len(idxs_obj),
+                                        device=idxs_obj.device
+                                    )
+
+                                    chosen = idxs_obj[perm[:2]]
+
+                                else:
+
+                                    chosen = idxs_obj.repeat(2)[:2]
+
+                                # [2, D]
+                                obj_feats.append(
+                                    feats_b[chosen]
+                                )
+
+                        # -----------------------------------------------------
+                        # Pad if fewer than K=6 objects were found
+                        # -----------------------------------------------------
+                        while len(obj_feats) < K:
+
+                            rand_idx = torch.randint(
+                                0,
+                                N,
+                                (2,),
+                                device=feats_b.device
+                            )
+
+                            obj_feats.append(
+                                feats_b[rand_idx]
+                            )
+
+                        # Keep exactly K objects
+                        obj_feats = obj_feats[:K]
+
+                        # [K*2, D]
+                        obj_feats = torch.cat(
+                            obj_feats,
+                            dim=0
+                        )
+
+                        all_reprs.append(obj_feats)
+
+                    # ---------------------------------------------------------
+                    # Final outputs
+                    # ---------------------------------------------------------
+
+                    # [B, K*2, D]
+                    slots_out = torch.stack(
+                        all_reprs
+                    ).to(self.device)
+
+                    # [B, K, H, W]
+                    masks_out = patch_masks
+
+                    reconstructions_out = slots_out
+
                 elif 'ft-dinosaur-patch-avg' in model_name:
                     def feature_select(image_forward_outs):
                         image_features = image_forward_outs.hidden_states[-2]
