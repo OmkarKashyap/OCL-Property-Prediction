@@ -192,6 +192,104 @@ class DownstreamPredictionStep(DownstreamStep):
                     masks_out = patch_masks
                     reconstructions_out = slots_out
 
+                elif "siglip" in model_name.lower():
+                    from transformers import SiglipImageProcessor
+
+                    image_processor = SiglipImageProcessor.from_pretrained( "google/siglip-base-patch16-224" )
+
+                    x_siglip = image_processor( images=x, return_tensors="pt", )["pixel_values"].to(x.device)
+
+                    image_forward_outs = self.model(
+                        x_siglip,
+                        output_hidden_states=True,
+                    )
+
+                    # No CLS token in SigLIP.
+                    image_features = image_forward_outs.hidden_states[-2]
+                    image_features = image_features.to(x.dtype)
+
+                    B, N, D = image_features.shape
+
+                    B_mask, K, C, H_in, W_in = mask.shape
+                    assert B == B_mask
+
+                    H = W = int(N ** 0.5)
+                    assert H * W == N, (
+                        f"Number of SigLIP patches ({N}) is not square."
+                    )
+
+                    mask_ids = mask.view(
+                        B * K, C, H_in, W_in
+                    )
+
+                    patch_masks = torch.nn.functional.interpolate(
+                        mask_ids.float(),
+                        size=(H, W),
+                        mode="nearest",
+                    ).long()
+
+                    patch_masks = patch_masks.view(
+                        B, K, H, W
+                    )
+
+                    all_reprs = []
+
+                    for b in range(B):
+                        feats_b = image_features[b]
+                        masks_bk = patch_masks[b]
+
+                        obj_feats = []
+
+                        for k in range(K):
+                            mk = masks_bk[k]
+
+                            obj_ids = torch.unique(mk)
+                            obj_ids = obj_ids[obj_ids > 0]
+
+                            for oid in obj_ids:
+                                coords = (mk == oid).nonzero(
+                                    as_tuple=False
+                                )
+
+                                if coords.shape[0] == 0:
+                                    continue
+
+                                idxs_obj = (
+                                    coords[:, 0] * W + coords[:, 1]
+                                )
+
+                                if len(idxs_obj) >= 2:
+                                    perm = torch.randperm(
+                                        len(idxs_obj),
+                                        device=idxs_obj.device,
+                                    )
+                                    chosen = idxs_obj[perm[:2]]
+                                else:
+                                    chosen = idxs_obj.repeat(2)[:2]
+
+                                obj_feats.append(feats_b[chosen])
+
+                        while len(obj_feats) < K:
+                            rand_idx = torch.randint(
+                                0,
+                                N,
+                                (2,),
+                                device=feats_b.device,
+                            )
+                            obj_feats.append(feats_b[rand_idx])
+
+                        obj_feats = obj_feats[:K]
+                        obj_feats = torch.cat(obj_feats, dim=0)
+
+                        all_reprs.append(obj_feats)
+
+                    slots_out = torch.stack(
+                        all_reprs
+                    ).to(self.device)
+
+                    masks_out = patch_masks
+                    reconstructions_out = slots_out
+
                 elif "clip" in model_name.lower():
                     def feature_select(image_forward_outs):
                         # CLIPVisionModel:

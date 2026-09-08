@@ -195,6 +195,18 @@ def load_model(
 
         return vision_tower
     
+    elif 'siglip' in model_name.lower():
+        from transformers import SiglipVisionModel
+
+        vision_tower = SiglipVisionModel.from_pretrained(
+            'google/siglip-base-patch16-224'
+        )
+
+        vision_tower = vision_tower.cuda().eval()
+        vision_tower.requires_grad_(False)
+
+        return vision_tower
+
     elif 'clip' in model_name.lower():
         from transformers import CLIPVisionModel, CLIPImageProcessor
 
@@ -328,6 +340,7 @@ def infer_model_type(model_name: str) -> str:
         "slot-attention-big-decoder",
         "dinov2",
         "clip",
+        "siglip",
         "ft-dinosaur",
         "ft-dinosaur-patch-avg",
         "dinosaur",

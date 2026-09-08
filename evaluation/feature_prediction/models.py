@@ -54,6 +54,8 @@ def make_downstream_model(
         latent_size_per_slot = 768
     elif 'clip' in model_name.lower():
         latent_size_per_slot = 1024
+    elif 'siglip' in model_name.lower():
+        latent_size_per_slot = 768
 
     model_type = "object-centric"
     if model_type == "object-centric":
