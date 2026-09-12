@@ -129,6 +129,17 @@ class DownstreamPredictionStep(DownstreamStep):
                 x = x.float()
                 model_name = config.model.name
 
+                print("\n========== IMAGE DEBUG ==========")
+                print(f"Model: {model_name}")
+                print(f"Image shape: {x.shape}")
+                print(f"Image dtype: {x.dtype}")
+                print(f"Image min: {x.min().item():.6f}")
+                print(f"Image max: {x.max().item():.6f}")
+                print(f"Image mean: {x.mean().item():.6f}")
+                print(f"Image variance: {x.var().item():.6f}")
+                print(f"Image std: {x.std().item():.6f}")
+                print("=================================\n")
+
                 if "dinov2" in model_name.lower():
                     def feature_select(image_forward_outs):
                         image_features = image_forward_outs.hidden_states[-2]
@@ -576,6 +587,16 @@ class DownstreamPredictionStep(DownstreamStep):
             #     mask = output["mask"].detach().to(self.device)
             # else:
             #     mask = None
+
+        print("\n====== DOWNSTREAM INPUT DEBUG ======")
+        print(f"Representation shape: {representation.shape}")
+        print(f"Representation dtype: {representation.dtype}")
+        print(f"Representation min: {representation.min().item():.6f}")
+        print(f"Representation max: {representation.max().item():.6f}")
+        print(f"Representation mean: {representation.mean().item():.6f}")
+        print(f"Representation variance: {representation.var().item():.6f}")
+        print(f"Representation std: {representation.std().item():.6f}")
+        print("====================================\n")
 
         # Forward pass through downstream model.
         # y_pred shape: (B, num slots, feature dim) for OC models, (B, num slots * feature dim) for VAEs.
