@@ -26,6 +26,10 @@ from utils.slot_matching import (
     hungarian_algorithm,
 )
 
+from transformers import AutoImageProcessor
+import torch.nn.functional as F
+from PIL import Image
+
 from .loss import DownstreamLoss, get_loss_fn
 from .models import DownstreamPredictionModel
 import math
@@ -104,12 +108,184 @@ class DownstreamPredictionStep(DownstreamStep):
 
     def __post_init__(self):
         super().__post_init__()
+
+        if "dinov2" in self.config.model.name.lower():
+            self.image_processor = AutoImageProcessor.from_pretrained(
+                "facebook/dinov2-base"
+            )
+
         if self.ignored_features is None:
             self.ignored_features = []
 
+    # def _preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+    #     print(f"DownstreamPredictionStep batch before preprocess shape mask - {batch['mask'].shape}")
+    #     print(f"DownstreamPredictionStep batch before preprocess shape image - {batch['image'].shape}")
+
+    #     for name in ["image", "y_true", "is_foreground", "is_modified", "mask"]:
+    #         batch[name] = batch[name].to(self.device, non_blocking=True)
+        
+    #     print(f"DownstreamPredictionStep batch after preprocess shape mask - {batch['mask'].shape}")
+    #     print(f"DownstreamPredictionStep batch after preprocess shape image - {batch['image'].shape}")
+
+    #     return batch
+
     def _preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+
+        # ============================================================
+        # Move everything to GPU
+        # ============================================================
         for name in ["image", "y_true", "is_foreground", "is_modified", "mask"]:
-            batch[name] = batch[name].to(self.device, non_blocking=True)
+            batch[name] = batch[name].to(
+                self.device,
+                non_blocking=True,
+            )
+
+        # ============================================================
+        # DINOv2 preprocessing
+        # ============================================================
+        if "dinov2" in self.config.model.name.lower():
+
+            # --------------------------------------------------------
+            # IMAGE
+            # --------------------------------------------------------
+            image = batch["image"]
+
+            print(
+                f"DownstreamPredictionStep before pre-process batch - "
+                f"Feature Name: image, Feature Shape: {image.shape}"
+            )
+
+            # batch["image"]:
+            # [B, H, W, 3]
+            #
+            # AutoImageProcessor:
+            # [B, H, W, 3] -> [B, 3, H_dino, W_dino]
+
+            image = self.image_processor(
+                images=image,
+                return_tensors="pt",
+            )["pixel_values"].to(self.device, non_blocking=True)
+
+            # Resize to requested dataset dimensions
+            #
+            # [B, 3, H_dino, W_dino]
+            #       ↓
+            # [B, 3, self.height, self.width]
+
+            image = image.to(self.device, non_blocking=True)
+
+            image = F.interpolate(
+                image,
+                size=(336, 336),
+                mode="bilinear",
+                align_corners=False,
+            )
+
+            print(
+                f"Pre-processed image batch shape: {image.shape} "
+                f"and data type: {image.dtype}"
+            )
+
+            batch["image"] = image
+
+            # # --------------------------------------------------------
+            # # MASK
+            # # --------------------------------------------------------
+            # mask = batch["mask"]
+
+            # print(
+            #     f"DownstreamPredictionStep before pre-process batch - "
+            #     f"Feature Name: mask, Feature Shape: {mask.shape}"
+            # )
+
+            # # Original:
+            # #
+            # # feature: [H, W, 1]
+            # # np.stack([feature] * 3, axis=-1)
+            # #       -> [H, W, 1, 3]
+            # #
+            # # However, because we now have a batch, we should construct
+            # # the equivalent batched representation directly.
+
+            # # [B, H, W, 1] -> [B, H, W, 3]
+            # mask = mask.expand(-1, -1, -1, 3)
+
+            # mask = self.image_processor(
+            #     images=mask,
+            #     do_rescale=False,
+            #     do_normalize=False,
+            #     resample=Image.Resampling.NEAREST,
+            #     return_tensors="pt",
+            # )["pixel_values"]
+
+            # # [B, 3, H, W] -> [B, H, W]
+            # mask = mask[:, 0].long().to(torch.int32)
+
+            # # Resize mask to requested dataset dimensions
+            # #
+            # # [B, H, W]
+            # #    ↓
+            # # [B, 1, H, W]
+            # #    ↓
+            # # interpolate
+            # #    ↓
+            # # [B, H_new, W_new]
+
+            # mask = F.interpolate(
+            #     mask.unsqueeze(1).float(),
+            #     size=(336, 336),
+            #     mode="nearest",
+            # ).squeeze(1).to(torch.int32)
+
+            # # [B, H, W] -> [B, H, W, 1]
+            # mask = mask.unsqueeze(-1)
+
+            # # [B, H, W, 1]
+            # #       ↓ one_hot
+            # # [B, H, W, 1, K]
+            # one_hot_masks = F.one_hot(
+            #     mask.long(),
+            #     num_classes=self.max_num_objects,
+            # )
+
+            # # Original:
+            # #
+            # # [H, W, 1, K]
+            # #       ↓
+            # # [K, 1, H, W]
+            # #
+            # # Batched:
+            # #
+            # # [B, H, W, 1, K]
+            # #       ↓
+            # # [B, K, 1, H, W]
+
+            # one_hot_masks = one_hot_masks.permute(
+            #     0, 4, 3, 1, 2
+            # ).to(torch.float32)
+
+            # print(
+            #     f"Pre-processed mask batch shape: {one_hot_masks.shape} "
+            #     f"and data type: {one_hot_masks.dtype}"
+            # )
+
+            # batch["mask"] = one_hot_masks
+
+            # ---------------------------------------------------------
+            # Mask
+            # ---------------------------------------------------------
+            mask = batch["mask"]
+
+            print(
+                f"DownstreamPredictionStep pre-process batch - "
+                f"Feature Name: mask, Feature Shape: {mask.shape}"
+            )
+
+            # Mask is ALREADY one-hot encoded by the Dataset.
+            # Shape:
+            # [B, K, 1, H, W]
+            batch["mask"] = mask
+
         return batch
 
     def _predict(self, x: Tensor, idxs: Tensor, mask, config) -> Dict[str, Any]:
