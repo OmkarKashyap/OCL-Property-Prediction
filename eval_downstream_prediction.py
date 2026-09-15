@@ -285,7 +285,6 @@ def main(config: DictConfig):
             ignore_mode=config.train_ignore_mode,
             ignored_features=train_dataset.dataset_transform_op.modified_features,
             use_cache=config.use_cache,
-            gradient_accumulation_steps=config.gradient_accumulation_steps,
             config = checkpoint_config
         )
         training_time = time.perf_counter() - time_start  # includes validation

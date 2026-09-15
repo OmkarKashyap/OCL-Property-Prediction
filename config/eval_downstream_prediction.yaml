@@ -1,8 +1,7 @@
 checkpoint_path: ???
 device: cuda
 seed: 12345
-batch_size: 16 #64
-gradient_accumulation_steps: 8
+batch_size: 128 #64
 steps: 10000 #6000   # maximum number of steps
 downstream_model: linear #MLP1   # "linear" or "MLPx" or "wideMLPx" where x is a positive integer
 learning_rate: 1e-3
