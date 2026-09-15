@@ -1084,7 +1084,8 @@ def train(
     ignore_mode: Optional[IgnoreModeType] = None,
     ignored_features: Optional[List[str]] = None,
     use_cache: bool = True,
-    config = None
+    config = None,
+    gradient_accumulation_steps: int = 1
 ) -> int:
     assert (
         matching == "loss"
@@ -1092,6 +1093,9 @@ def train(
         or (matching == "deterministic" and model_type == "distributed")
     )
     assert ignore_mode in ["modified_objects", "modified_features", None]
+
+    microbatch_validation_every = (validation_every * gradient_accumulation_steps)
+
     # assert model.training is False
     downstream_model.train()
     checkpoint_dir = Path(checkpoint_dir)
@@ -1108,12 +1112,13 @@ def train(
         use_cache=use_cache,
         ignore_mode=ignore_mode,
         ignored_features=ignored_features,
-        config = config
+        config = config,
+        gradient_accumulation_steps=gradient_accumulation_steps
     )
     checkpoint_path = checkpoint_dir / f"checkpoint-{downstream_model.identifier}.pt"
     train_engine = Engine(downstream_step)
 
-    @train_engine.on(Events.ITERATION_COMPLETED(every=validation_every))
+    @train_engine.on(Events.ITERATION_COMPLETED(every=microbatch_validation_every))
     def save_model(engine):
         state_dicts = {
             "model": downstream_model.state_dict(),
@@ -1130,7 +1135,7 @@ def train(
     # if sys.stdout.isatty():
     #     ProgressBar().attach(train_engine, ["loss (running avg)"])
 
-    @train_engine.on(Events.ITERATION_COMPLETED(every=validation_every))
+    @train_engine.on(Events.ITERATION_COMPLETED(every=microbatch_validation_every))
     def log_loss(engine):
         logging.info(
             f"Training loss (running avg): {engine.state.metrics['loss (running avg)']:.3g}"
@@ -1139,7 +1144,7 @@ def train(
     # Share downstream step object in training and validation.
     validation_engine = Engine(downstream_step)
 
-    @train_engine.on(Events.ITERATION_COMPLETED(every=validation_every))
+    @train_engine.on(Events.ITERATION_COMPLETED(every=microbatch_validation_every))
     def run_validation(engine):
         logging.info("Running validation for early stopping")
         downstream_model.eval()
@@ -1213,14 +1218,31 @@ def train(
         ),
     )
 
+    # if lr_scheduler is not None:
+
+    #     @train_engine.on(Events.ITERATION_COMPLETED)
+    #     def lr_scheduler_step(engine):
+    #         lr_scheduler.step()
+
     if lr_scheduler is not None:
 
-        @train_engine.on(Events.ITERATION_COMPLETED)
+        @train_engine.on(
+            Events.ITERATION_COMPLETED(
+                every=gradient_accumulation_steps
+            )
+        )
         def lr_scheduler_step(engine):
             lr_scheduler.step()
 
-    train_engine.run(dataloader, max_epochs=1, epoch_length=steps)
-    return train_engine.state.iteration
+    microbatch_steps = steps * gradient_accumulation_steps
+
+    train_engine.run(
+        dataloader,
+        max_epochs=1,
+        epoch_length=microbatch_steps,
+    )
+
+    return train_engine.state.iteration // gradient_accumulation_steps
 
 
 @torch.no_grad()
