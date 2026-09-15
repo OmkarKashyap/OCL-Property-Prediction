@@ -215,7 +215,7 @@ class MultiObjectDataset(Dataset):
                 num_classes=self.max_num_objects,
             )
             # (num_objects, 1, height, width)
-            #print(f"Pre-processed mask shape: {one_hot_masks.permute(3, 2, 0, 1).to(torch.float32).shape}")
+            print(f"Pre-processed mask shape: {one_hot_masks.permute(3, 2, 0, 1).to(torch.float32).shape}")
             return one_hot_masks.permute(3, 2, 0, 1).to(torch.float32)
         if feature_name == "visibility":
             feature = torch.as_tensor(feature, dtype=torch.float32)
@@ -868,77 +868,69 @@ class COCOSlotDinoV2Dataset(MultiObjectDataset):
         self.patch_size=14
         super().__post_init__()
     
-    # def _preprocess_feature(self, feature, feature_name):
+    def _preprocess_feature(self, feature, feature_name):
 
-    #     print(f"COCOSlotDinoV2Dataset pre-process feature (before pre-processing) - Feature Name : {feature_name}, Feature Shape : {feature.shape}")
+        if feature_name == "image":
+            # DINOv2 preprocessing
+            image = self.processor(
+                images=feature,
+                return_tensors="pt",
+            )["pixel_values"].squeeze(0)   # [3, H_dino, W_dino]
 
-    #     if feature_name == "image":
-    #         # DINOv2 preprocessing
-    #         image = self.processor(
-    #             images=feature,
-    #             return_tensors="pt",
-    #         )["pixel_values"].squeeze(0)   # [3, H_dino, W_dino]
+            # Resize to requested dataset dimensions
+            image = F.interpolate(
+                image.unsqueeze(0),        # [1, 3, H, W]
+                size=(self.height, self.width),
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(0)                    # [3, self.height, self.width]
 
-    #         # Resize to requested dataset dimensions
-    #         image = F.interpolate(
-    #             image.unsqueeze(0),        # [1, 3, H, W]
-    #             size=(self.height, self.width),
-    #             mode="bilinear",
-    #             align_corners=False,
-    #         ).squeeze(0)                    # [3, self.height, self.width]
+            return image
 
-    #         print(
-    #             f"Pre-processed image shape: {image.shape} "
-    #             f"and Pre-processed image data type: {image.dtype}"
-    #         )
+        if feature_name == "mask":
+            mask = np.stack([feature] * 3, axis=-1)
 
+            processed_mask = self.processor(
+                images=mask,
+                do_rescale=False,
+                do_normalize=False,
+                resample=Image.Resampling.NEAREST,
+                return_tensors="pt",
+            )["pixel_values"]
 
-    #         return image
+            # [1, 3, H, W] -> [H, W]
+            mask = processed_mask[0, 0].long().to(torch.int32)
 
-    #     if feature_name == "mask":
-    #         mask = np.stack([feature] * 3, axis=-1)
+            # Resize mask to requested dimensions
+            mask = F.interpolate(
+                mask.unsqueeze(0).unsqueeze(0).float(),  # [1, 1, H, W]
+                size=(self.height, self.width),
+                mode="nearest",
+            ).squeeze(0).squeeze(0).to(torch.int32)
 
-    #         mask = self.processor(
-    #             images=mask,
-    #             do_rescale=False,
-    #             do_normalize=False,
-    #             resample=Image.Resampling.NEAREST,
-    #             return_tensors="pt",
-    #         )["pixel_values"]
+            # [H, W] -> [H, W, 1]
+            mask = mask.unsqueeze(-1)
 
-    #         # [1, 3, H, W] -> [H, W]
-    #         mask = mask[0, 0].long().to(torch.int32)
+            one_hot_masks = F.one_hot(
+                mask.long(),
+                num_classes=self.max_num_objects,
+            )
 
-    #         # Resize mask to requested dimensions
-    #         mask = F.interpolate(
-    #             mask.unsqueeze(0).unsqueeze(0).float(),  # [1, 1, H, W]
-    #             size=(self.height, self.width),
-    #             mode="nearest",
-    #         ).squeeze(0).squeeze(0).to(torch.int32)
+            one_hot_masks = one_hot_masks.permute(
+                3, 2, 0, 1
+            ).to(torch.float32)
 
-    #         # [H, W] -> [H, W, 1]
-    #         mask = mask.unsqueeze(-1)
+            print(
+                f"Pre-processed mask shape: {one_hot_masks.shape} "
+                f"and Pre-processed mask data type: {one_hot_masks.dtype}"
+            )
 
-    #         one_hot_masks = F.one_hot(
-    #             mask.long(),
-    #             num_classes=self.max_num_objects,
-    #         )
+            return one_hot_masks
 
-    #         one_hot_masks = one_hot_masks.permute(
-    #             3, 2, 0, 1
-    #         ).to(torch.float32)
-
-    #         print(
-    #             f"Pre-processed mask shape: {one_hot_masks.shape} "
-    #             f"and Pre-processed mask data type: {one_hot_masks.dtype}"
-    #         )
-
-    #         return one_hot_masks
-
-    #     return super()._preprocess_feature(
-    #         feature,
-    #         feature_name,
-    #     )
+        return super()._preprocess_feature(
+            feature,
+            feature_name,
+        )
 
     def _load_data(self):
         cache_path_train = Path("/data/radhika/OCL-Property-Prediction/datasets") / "coco_slots_20000.h5"
