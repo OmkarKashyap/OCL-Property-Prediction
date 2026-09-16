@@ -110,12 +110,21 @@ class DownstreamStep:
     ) -> Dict[str, Any]:
         return out
 
+    def _visualize(
+        self,
+        batch,
+        save_dir="mask_visualizations",
+        num_images=1,
+    ):
+        return
+
     def __call__(self, engine: Engine, batch: Dict[str, Any]) -> Dict[str, Any]:
 
         # ------------------------------------------------------------
         # Forward pass
         # ------------------------------------------------------------
         batch = self._preprocess(batch)
+        self._visualize(batch)
         out = self._predict(
             batch["image"],
             batch["sample_id"],

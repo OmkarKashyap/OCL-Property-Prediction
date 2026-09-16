@@ -291,20 +291,57 @@ class DownstreamPredictionStep(DownstreamStep):
 
             # batch["mask"] = one_hot_masks
 
-            # ---------------------------------------------------------
-            # Mask
-            # ---------------------------------------------------------
+            # # ---------------------------------------------------------
+            # # Mask
+            # # ---------------------------------------------------------
+            # mask = batch["mask"]
+
+            # print(
+            #     f"DownstreamPredictionStep pre-process batch - "
+            #     f"Feature Name: mask, Feature Shape: {mask.shape}"
+            # )
+
+            # # Mask is ALREADY one-hot encoded by the Dataset.
+            # # Shape:
+            # # [B, K, 1, H, W]
+            # batch["mask"] = mask
+
+            # mask: [B, K, 1, H, W]
+
             mask = batch["mask"]
 
-            print(
-                f"DownstreamPredictionStep pre-process batch - "
-                f"Feature Name: mask, Feature Shape: {mask.shape}"
+            B, K, _, H, W = mask.shape
+
+            # Treat every object mask as an independent 1-channel image
+            mask = mask.view(B * K, 1, H, W)
+
+            # Duplicate to 3 channels for the image processor
+            mask = mask.expand(-1, 3, -1, -1)
+
+            # Apply the same geometric preprocessing as the image
+            # WITHOUT rescaling/normalization
+            mask = self.image_processor(
+                images=mask,
+                do_rescale=False,
+                do_normalize=False,
+                resample=Image.Resampling.NEAREST,
+                return_tensors="pt",
+            )["pixel_values"]
+
+            # [B*K, 3, H', W'] -> [B*K, 1, H', W']
+            mask = mask[:, :1]
+
+            # Final resize corresponding to your image preprocessing
+            mask = F.interpolate(
+                mask,
+                size=(336, 336),
+                mode="nearest",
             )
 
-            # Mask is ALREADY one-hot encoded by the Dataset.
-            # Shape:
-            # [B, K, 1, H, W]
-            batch["mask"] = mask
+            # Restore object dimension
+            mask = mask.view(B, K, 1, 336, 336)
+
+            batch["mask"] = mask.to(torch.float32)
 
         return batch
 
@@ -907,6 +944,188 @@ class DownstreamPredictionStep(DownstreamStep):
         selected_objects = batch["is_selected"].to(self.device)  # (B, num objects, 1)
         cost_matrix = cost_matrix * selected_objects + 100000 * (1 - selected_objects)
         return cost_matrix
+
+    def _visualize(
+        self,
+        batch,
+        save_dir="debug_visualizations",
+        num_images=1,
+    ):
+        """
+        Visualize preprocessed images and the corresponding object masks.
+
+        Expected batch:
+            batch["image"]: [B, 3, H, W]
+            batch["mask"]:  [B, K, 1, H, W]
+
+        The image is denormalized using the mean/std from the
+        DINOv2 image processor.
+
+        For each selected image, saves:
+            - the preprocessed image
+            - the 6 objects extracted using the preprocessed masks
+        """
+
+        import os
+        import numpy as np
+        import matplotlib.pyplot as plt
+        import torch
+
+        os.makedirs(save_dir, exist_ok=True)
+
+        # ---------------------------------------------------------
+        # Get image and mask from batch
+        # ---------------------------------------------------------
+        image = batch["image"]
+        mask = batch["mask"]
+
+        print("\n========== VISUALIZATION DEBUG ==========")
+        print(f"Batch image shape : {image.shape}")
+        print(f"Batch mask shape  : {mask.shape}")
+
+        # Expected:
+        # image -> [B, 3, H, W]
+        # mask  -> [B, K, 1, H, W]
+
+        num_images = min(num_images, image.shape[0])
+
+        # ---------------------------------------------------------
+        # Move only the images we are visualizing to CPU
+        # ---------------------------------------------------------
+        image = image[:num_images].detach().cpu()
+        mask = mask[:num_images].detach().cpu()
+
+        # ---------------------------------------------------------
+        # DINOv2 normalization parameters
+        # ---------------------------------------------------------
+        mean = torch.tensor(
+            self.image_processor.image_mean,
+            dtype=image.dtype
+        ).view(3, 1, 1)
+
+        std = torch.tensor(
+            self.image_processor.image_std,
+            dtype=image.dtype
+        ).view(3, 1, 1)
+
+        # ---------------------------------------------------------
+        # Number of objects
+        # ---------------------------------------------------------
+        num_objects = min(6, mask.shape[1])
+
+        # ---------------------------------------------------------
+        # Process each image independently
+        # ---------------------------------------------------------
+        for b in range(num_images):
+
+            img = image[b]
+
+            # -----------------------------------------------------
+            # Undo DINOv2 normalization
+            # -----------------------------------------------------
+            img = img * std + mean
+            img = img.clamp(0, 1)
+
+            # CHW -> HWC
+            img_np = img.permute(1, 2, 0).numpy()
+
+            # -----------------------------------------------------
+            # Print mask information
+            # -----------------------------------------------------
+            print(f"\nImage {b}")
+            print(f"Image shape: {img.shape}")
+
+            print(f"Mask shape: {mask[b].shape}")
+
+            # -----------------------------------------------------
+            # Create figure
+            #
+            # Left:
+            #   original/preprocessed image
+            #
+            # Right:
+            #   6 extracted objects
+            # -----------------------------------------------------
+            fig = plt.figure(figsize=(16, 8))
+
+            gs = fig.add_gridspec(
+                2,
+                4,
+                width_ratios=[1.2, 1, 1, 1]
+            )
+
+            # -----------------------------------------------------
+            # Display full image
+            # -----------------------------------------------------
+            ax_img = fig.add_subplot(gs[:, 0])
+
+            ax_img.imshow(img_np)
+            ax_img.set_title("Preprocessed Image")
+            ax_img.axis("off")
+
+            # -----------------------------------------------------
+            # Display each object
+            # -----------------------------------------------------
+            for obj_id in range(num_objects):
+
+                obj_mask = mask[b, obj_id, 0]
+
+                # Print mask statistics
+                unique_values = torch.unique(obj_mask)
+
+                foreground_pixels = (obj_mask > 0).sum().item()
+
+                print(
+                    f"  Object {obj_id}: "
+                    f"shape={tuple(obj_mask.shape)}, "
+                    f"dtype={obj_mask.dtype}, "
+                    f"min={obj_mask.min().item()}, "
+                    f"max={obj_mask.max().item()}, "
+                    f"unique={unique_values.tolist()}, "
+                    f"foreground_pixels={foreground_pixels}"
+                )
+
+                # -------------------------------------------------
+                # Extract object from image
+                # -------------------------------------------------
+                obj_mask_np = obj_mask.numpy()
+
+                extracted = img_np.copy()
+
+                # Everything outside the object becomes black
+                extracted[obj_mask_np <= 0] = 0
+
+                # -------------------------------------------------
+                # Position in 2x3 grid
+                # -------------------------------------------------
+                row = obj_id // 3
+                col = (obj_id % 3) + 1
+
+                ax = fig.add_subplot(gs[row, col])
+
+                ax.imshow(extracted)
+                ax.set_title(f"Object {obj_id + 1}")
+                ax.axis("off")
+
+            # -----------------------------------------------------
+            # Save visualization
+            # -----------------------------------------------------
+            save_path = os.path.join(
+                save_dir,
+                f"image_{b}.png"
+            )
+
+            plt.tight_layout()
+            plt.savefig(
+                save_path,
+                dpi=150,
+                bbox_inches="tight"
+            )
+            plt.close(fig)
+
+            print(f"Saved visualization to: {save_path}")
+
+        print("=========================================\n")
 
     def _internal_call(
         self, batch: Dict[str, Any], out: Dict[str, Any]
