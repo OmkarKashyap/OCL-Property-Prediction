@@ -1,0 +1,494 @@
+[
+  {
+    "train_config.uuid": "ft-dino-test-001",
+    "eval_config": {
+      "downstream_task": "factor prediction",
+      "train_variant_type": "original",
+      "train_variant_name": null,
+      "test_variant_type": "original",
+      "test_variant_name": null,
+      "train_modified_features": [],
+      "test_modified_features": [],
+      "checkpoint_path": "/mnt/data2/radhika/OCL-Property-Prediction/checkpoints/oc_eval",
+      "device": "cuda",
+      "seed": 12345,
+      "batch_size": 128,
+      "gradient_accumulation_steps": 1,
+      "steps": 10000,
+      "downstream_model": "linear",
+      "learning_rate": 0.001,
+      "lr_decay_milestones": [
+        2000,
+        4000
+      ],
+      "lr_decay_factor": 0.5,
+      "train_size": 20000,
+      "validation_size": 1000,
+      "test_size": 4952,
+      "validation_every": 50,
+      "matching": "loss",
+      "train_ignore_mode": "modified_objects",
+      "test_ignore_mode": "two_steps"
+    },
+    "results": {
+      "object_filter": "all",
+      "feature_name": "class",
+      "metric_name": "top1_acc",
+      "metric_value": 0.7998603436881982,
+      "downstream_steps_trained": 800,
+      "training_time": 7891.524642705001,
+      "evaluation_time": 360.64635232600267
+    }
+  },
+  {
+    "train_config.uuid": "ft-dino-test-001",
+    "eval_config": {
+      "downstream_task": "factor prediction",
+      "train_variant_type": "original",
+      "train_variant_name": null,
+      "test_variant_type": "original",
+      "test_variant_name": null,
+      "train_modified_features": [],
+      "test_modified_features": [],
+      "checkpoint_path": "/mnt/data2/radhika/OCL-Property-Prediction/checkpoints/oc_eval",
+      "device": "cuda",
+      "seed": 12345,
+      "batch_size": 128,
+      "gradient_accumulation_steps": 1,
+      "steps": 10000,
+      "downstream_model": "linear",
+      "learning_rate": 0.001,
+      "lr_decay_milestones": [
+        2000,
+        4000
+      ],
+      "lr_decay_factor": 0.5,
+      "train_size": 20000,
+      "validation_size": 1000,
+      "test_size": 4952,
+      "validation_every": 50,
+      "matching": "loss",
+      "train_ignore_mode": "modified_objects",
+      "test_ignore_mode": "two_steps"
+    },
+    "results": {
+      "object_filter": "all",
+      "feature_name": "class",
+      "metric_name": "top5_acc",
+      "metric_value": 0.9399656700131945,
+      "downstream_steps_trained": 800,
+      "training_time": 7891.524642705001,
+      "evaluation_time": 360.64635232600267
+    }
+  },
+  {
+    "train_config.uuid": "ft-dino-test-001",
+    "eval_config": {
+      "downstream_task": "factor prediction",
+      "train_variant_type": "original",
+      "train_variant_name": null,
+      "test_variant_type": "original",
+      "test_variant_name": null,
+      "train_modified_features": [],
+      "test_modified_features": [],
+      "checkpoint_path": "/mnt/data2/radhika/OCL-Property-Prediction/checkpoints/oc_eval",
+      "device": "cuda",
+      "seed": 12345,
+      "batch_size": 128,
+      "gradient_accumulation_steps": 1,
+      "steps": 10000,
+      "downstream_model": "linear",
+      "learning_rate": 0.001,
+      "lr_decay_milestones": [
+        2000,
+        4000
+      ],
+      "lr_decay_factor": 0.5,
+      "train_size": 20000,
+      "validation_size": 1000,
+      "test_size": 4952,
+      "validation_every": 50,
+      "matching": "loss",
+      "train_ignore_mode": "modified_objects",
+      "test_ignore_mode": "two_steps"
+    },
+    "results": {
+      "object_filter": "modified",
+      "feature_name": "class",
+      "metric_name": "top1_acc",
+      "metric_value": null,
+      "downstream_steps_trained": 800,
+      "training_time": 7891.524642705001,
+      "evaluation_time": 360.64635232600267
+    }
+  },
+  {
+    "train_config.uuid": "ft-dino-test-001",
+    "eval_config": {
+      "downstream_task": "factor prediction",
+      "train_variant_type": "original",
+      "train_variant_name": null,
+      "test_variant_type": "original",
+      "test_variant_name": null,
+      "train_modified_features": [],
+      "test_modified_features": [],
+      "checkpoint_path": "/mnt/data2/radhika/OCL-Property-Prediction/checkpoints/oc_eval",
+      "device": "cuda",
+      "seed": 12345,
+      "batch_size": 128,
+      "gradient_accumulation_steps": 1,
+      "steps": 10000,
+      "downstream_model": "linear",
+      "learning_rate": 0.001,
+      "lr_decay_milestones": [
+        2000,
+        4000
+      ],
+      "lr_decay_factor": 0.5,
+      "train_size": 20000,
+      "validation_size": 1000,
+      "test_size": 4952,
+      "validation_every": 50,
+      "matching": "loss",
+      "train_ignore_mode": "modified_objects",
+      "test_ignore_mode": "two_steps"
+    },
+    "results": {
+      "object_filter": "modified",
+      "feature_name": "class",
+      "metric_name": "top5_acc",
+      "metric_value": null,
+      "downstream_steps_trained": 800,
+      "training_time": 7891.524642705001,
+      "evaluation_time": 360.64635232600267
+    }
+  },
+  {
+    "train_config.uuid": "ft-dino-test-001",
+    "eval_config": {
+      "downstream_task": "factor prediction",
+      "train_variant_type": "original",
+      "train_variant_name": null,
+      "test_variant_type": "original",
+      "test_variant_name": null,
+      "train_modified_features": [],
+      "test_modified_features": [],
+      "checkpoint_path": "/mnt/data2/radhika/OCL-Property-Prediction/checkpoints/oc_eval",
+      "device": "cuda",
+      "seed": 12345,
+      "batch_size": 128,
+      "gradient_accumulation_steps": 1,
+      "steps": 10000,
+      "downstream_model": "linear",
+      "learning_rate": 0.001,
+      "lr_decay_milestones": [
+        2000,
+        4000
+      ],
+      "lr_decay_factor": 0.5,
+      "train_size": 20000,
+      "validation_size": 1000,
+      "test_size": 4952,
+      "validation_every": 50,
+      "matching": "loss",
+      "train_ignore_mode": "modified_objects",
+      "test_ignore_mode": "two_steps"
+    },
+    "results": {
+      "object_filter": "unmodified",
+      "feature_name": "class",
+      "metric_name": "top1_acc",
+      "metric_value": 0.7998603436881982,
+      "downstream_steps_trained": 800,
+      "training_time": 7891.524642705001,
+      "evaluation_time": 360.64635232600267
+    }
+  },
+  {
+    "train_config.uuid": "ft-dino-test-001",
+    "eval_config": {
+      "downstream_task": "factor prediction",
+      "train_variant_type": "original",
+      "train_variant_name": null,
+      "test_variant_type": "original",
+      "test_variant_name": null,
+      "train_modified_features": [],
+      "test_modified_features": [],
+      "checkpoint_path": "/mnt/data2/radhika/OCL-Property-Prediction/checkpoints/oc_eval",
+      "device": "cuda",
+      "seed": 12345,
+      "batch_size": 128,
+      "gradient_accumulation_steps": 1,
+      "steps": 10000,
+      "downstream_model": "linear",
+      "learning_rate": 0.001,
+      "lr_decay_milestones": [
+        2000,
+        4000
+      ],
+      "lr_decay_factor": 0.5,
+      "train_size": 20000,
+      "validation_size": 1000,
+      "test_size": 4952,
+      "validation_every": 50,
+      "matching": "loss",
+      "train_ignore_mode": "modified_objects",
+      "test_ignore_mode": "two_steps"
+    },
+    "results": {
+      "object_filter": "unmodified",
+      "feature_name": "class",
+      "metric_name": "top5_acc",
+      "metric_value": 0.9399656700131945,
+      "downstream_steps_trained": 800,
+      "training_time": 7891.524642705001,
+      "evaluation_time": 360.64635232600267
+    }
+  },
+  {
+    "train_config.uuid": "ft-dino-test-001",
+    "eval_config": {
+      "downstream_task": "factor prediction",
+      "train_variant_type": "original",
+      "train_variant_name": null,
+      "test_variant_type": "original",
+      "test_variant_name": null,
+      "train_modified_features": [],
+      "test_modified_features": [],
+      "checkpoint_path": "/mnt/data2/radhika/OCL-Property-Prediction/checkpoints/oc_eval",
+      "device": "cuda",
+      "seed": 12345,
+      "batch_size": 128,
+      "gradient_accumulation_steps": 1,
+      "steps": 10000,
+      "downstream_model": "linear",
+      "learning_rate": 0.001,
+      "lr_decay_milestones": [
+        2000,
+        4000
+      ],
+      "lr_decay_factor": 0.5,
+      "train_size": 20000,
+      "validation_size": 1000,
+      "test_size": 4952,
+      "validation_every": 50,
+      "matching": "loss",
+      "train_ignore_mode": "modified_objects",
+      "test_ignore_mode": "two_steps"
+    },
+    "results": {
+      "object_filter": "all",
+      "feature_name": "coords_x",
+      "metric_name": "r2",
+      "metric_value": 0.7471455931663513,
+      "downstream_steps_trained": 800,
+      "training_time": 7891.524642705001,
+      "evaluation_time": 360.64635232600267
+    }
+  },
+  {
+    "train_config.uuid": "ft-dino-test-001",
+    "eval_config": {
+      "downstream_task": "factor prediction",
+      "train_variant_type": "original",
+      "train_variant_name": null,
+      "test_variant_type": "original",
+      "test_variant_name": null,
+      "train_modified_features": [],
+      "test_modified_features": [],
+      "checkpoint_path": "/mnt/data2/radhika/OCL-Property-Prediction/checkpoints/oc_eval",
+      "device": "cuda",
+      "seed": 12345,
+      "batch_size": 128,
+      "gradient_accumulation_steps": 1,
+      "steps": 10000,
+      "downstream_model": "linear",
+      "learning_rate": 0.001,
+      "lr_decay_milestones": [
+        2000,
+        4000
+      ],
+      "lr_decay_factor": 0.5,
+      "train_size": 20000,
+      "validation_size": 1000,
+      "test_size": 4952,
+      "validation_every": 50,
+      "matching": "loss",
+      "train_ignore_mode": "modified_objects",
+      "test_ignore_mode": "two_steps"
+    },
+    "results": {
+      "object_filter": "all",
+      "feature_name": "coords_y",
+      "metric_name": "r2",
+      "metric_value": 0.7617409825325012,
+      "downstream_steps_trained": 800,
+      "training_time": 7891.524642705001,
+      "evaluation_time": 360.64635232600267
+    }
+  },
+  {
+    "train_config.uuid": "ft-dino-test-001",
+    "eval_config": {
+      "downstream_task": "factor prediction",
+      "train_variant_type": "original",
+      "train_variant_name": null,
+      "test_variant_type": "original",
+      "test_variant_name": null,
+      "train_modified_features": [],
+      "test_modified_features": [],
+      "checkpoint_path": "/mnt/data2/radhika/OCL-Property-Prediction/checkpoints/oc_eval",
+      "device": "cuda",
+      "seed": 12345,
+      "batch_size": 128,
+      "gradient_accumulation_steps": 1,
+      "steps": 10000,
+      "downstream_model": "linear",
+      "learning_rate": 0.001,
+      "lr_decay_milestones": [
+        2000,
+        4000
+      ],
+      "lr_decay_factor": 0.5,
+      "train_size": 20000,
+      "validation_size": 1000,
+      "test_size": 4952,
+      "validation_every": 50,
+      "matching": "loss",
+      "train_ignore_mode": "modified_objects",
+      "test_ignore_mode": "two_steps"
+    },
+    "results": {
+      "object_filter": "modified",
+      "feature_name": "coords_x",
+      "metric_name": "r2",
+      "metric_value": null,
+      "downstream_steps_trained": 800,
+      "training_time": 7891.524642705001,
+      "evaluation_time": 360.64635232600267
+    }
+  },
+  {
+    "train_config.uuid": "ft-dino-test-001",
+    "eval_config": {
+      "downstream_task": "factor prediction",
+      "train_variant_type": "original",
+      "train_variant_name": null,
+      "test_variant_type": "original",
+      "test_variant_name": null,
+      "train_modified_features": [],
+      "test_modified_features": [],
+      "checkpoint_path": "/mnt/data2/radhika/OCL-Property-Prediction/checkpoints/oc_eval",
+      "device": "cuda",
+      "seed": 12345,
+      "batch_size": 128,
+      "gradient_accumulation_steps": 1,
+      "steps": 10000,
+      "downstream_model": "linear",
+      "learning_rate": 0.001,
+      "lr_decay_milestones": [
+        2000,
+        4000
+      ],
+      "lr_decay_factor": 0.5,
+      "train_size": 20000,
+      "validation_size": 1000,
+      "test_size": 4952,
+      "validation_every": 50,
+      "matching": "loss",
+      "train_ignore_mode": "modified_objects",
+      "test_ignore_mode": "two_steps"
+    },
+    "results": {
+      "object_filter": "modified",
+      "feature_name": "coords_y",
+      "metric_name": "r2",
+      "metric_value": null,
+      "downstream_steps_trained": 800,
+      "training_time": 7891.524642705001,
+      "evaluation_time": 360.64635232600267
+    }
+  },
+  {
+    "train_config.uuid": "ft-dino-test-001",
+    "eval_config": {
+      "downstream_task": "factor prediction",
+      "train_variant_type": "original",
+      "train_variant_name": null,
+      "test_variant_type": "original",
+      "test_variant_name": null,
+      "train_modified_features": [],
+      "test_modified_features": [],
+      "checkpoint_path": "/mnt/data2/radhika/OCL-Property-Prediction/checkpoints/oc_eval",
+      "device": "cuda",
+      "seed": 12345,
+      "batch_size": 128,
+      "gradient_accumulation_steps": 1,
+      "steps": 10000,
+      "downstream_model": "linear",
+      "learning_rate": 0.001,
+      "lr_decay_milestones": [
+        2000,
+        4000
+      ],
+      "lr_decay_factor": 0.5,
+      "train_size": 20000,
+      "validation_size": 1000,
+      "test_size": 4952,
+      "validation_every": 50,
+      "matching": "loss",
+      "train_ignore_mode": "modified_objects",
+      "test_ignore_mode": "two_steps"
+    },
+    "results": {
+      "object_filter": "unmodified",
+      "feature_name": "coords_x",
+      "metric_name": "r2",
+      "metric_value": 0.7471455931663513,
+      "downstream_steps_trained": 800,
+      "training_time": 7891.524642705001,
+      "evaluation_time": 360.64635232600267
+    }
+  },
+  {
+    "train_config.uuid": "ft-dino-test-001",
+    "eval_config": {
+      "downstream_task": "factor prediction",
+      "train_variant_type": "original",
+      "train_variant_name": null,
+      "test_variant_type": "original",
+      "test_variant_name": null,
+      "train_modified_features": [],
+      "test_modified_features": [],
+      "checkpoint_path": "/mnt/data2/radhika/OCL-Property-Prediction/checkpoints/oc_eval",
+      "device": "cuda",
+      "seed": 12345,
+      "batch_size": 128,
+      "gradient_accumulation_steps": 1,
+      "steps": 10000,
+      "downstream_model": "linear",
+      "learning_rate": 0.001,
+      "lr_decay_milestones": [
+        2000,
+        4000
+      ],
+      "lr_decay_factor": 0.5,
+      "train_size": 20000,
+      "validation_size": 1000,
+      "test_size": 4952,
+      "validation_every": 50,
+      "matching": "loss",
+      "train_ignore_mode": "modified_objects",
+      "test_ignore_mode": "two_steps"
+    },
+    "results": {
+      "object_filter": "unmodified",
+      "feature_name": "coords_y",
+      "metric_name": "r2",
+      "metric_value": 0.7617409825325012,
+      "downstream_steps_trained": 800,
+      "training_time": 7891.524642705001,
+      "evaluation_time": 360.64635232600267
+    }
+  }
+]
