@@ -134,11 +134,31 @@ class DownstreamPredictionStep(DownstreamStep):
         # ============================================================
         # Move everything to GPU
         # ============================================================
+        print("\n========== BEFORE CPU → GPU ==========")
+        for name in ["image", "y_true", "is_foreground", "is_modified", "mask"]:
+            if torch.is_tensor(batch[name]):
+                print(
+                    f"[BEFORE GPU] {name}: "
+                    f"shape={tuple(batch[name].shape)}, "
+                    f"dtype={batch[name].dtype}, "
+                    f"device={batch[name].device}"
+                )
+
         for name in ["image", "y_true", "is_foreground", "is_modified", "mask"]:
             batch[name] = batch[name].to(
                 self.device,
                 non_blocking=True,
             )
+
+        print("========== AFTER CPU → GPU ==========")
+        for name in ["image", "y_true", "is_foreground", "is_modified", "mask"]:
+            if torch.is_tensor(batch[name]):
+                print(
+                    f"[AFTER GPU] {name}: "
+                    f"shape={tuple(batch[name].shape)}, "
+                    f"dtype={batch[name].dtype}, "
+                    f"device={batch[name].device}"
+                )
 
         # ============================================================
         # DINOv2 preprocessing
@@ -289,6 +309,23 @@ class DownstreamPredictionStep(DownstreamStep):
         return batch
 
     def _predict(self, x: Tensor, idxs: Tensor, mask, config) -> Dict[str, Any]:
+
+        print("\n========== ENTERING DownstreamPredictionStep _PREDICT ==========")
+        print(
+            f"[MODEL INPUT] x: "
+            f"shape={tuple(x.shape)}, "
+            f"dtype={x.dtype}, "
+            f"device={x.device}"
+        )
+        print(
+            f"[MODEL INPUT] mask: "
+            f"shape={tuple(mask.shape)}, "
+            f"dtype={mask.dtype}, "
+            f"device={mask.device}"
+        )
+        print(f"[MODEL] device={self.device}")
+        print(f"[MODEL] name={config.model.name}")
+
         with torch.no_grad():
             # The output is on cpu because the cache is on cpu.
             output = self._get_cached_representation(idxs)
@@ -322,8 +359,15 @@ class DownstreamPredictionStep(DownstreamStep):
                         image_features = image_features[:, 1:]  # remove CLS
                         return image_features
 
+                    print(
+                        f"[BEFORE MODEL] x device={x.device}, "
+                        f"shape={tuple(x.shape)}, dtype={x.dtype}"
+                    )
+
                     image_forward_outs = self.model(x, output_hidden_states=True)
                     image_features = feature_select(image_forward_outs).to(x.dtype)
+
+                    print("[AFTER MODEL] model forward completed")
 
                     B, N, D = image_features.shape #torch.Size([256, 576, 768]) 
                     B, K, C, H_in, W_in = mask.shape #torch.Size([256, 6, 1, 336, 336]) 

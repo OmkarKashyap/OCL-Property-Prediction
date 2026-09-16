@@ -34,6 +34,29 @@ import json
 
 from transformers import AutoImageProcessor
 
+def debug_tensor(name, x):
+    if torch.is_tensor(x):
+        print(
+            f"[DEBUG] {name}: "
+            f"type={type(x).__name__}, "
+            f"shape={tuple(x.shape)}, "
+            f"dtype={x.dtype}, "
+            f"device={x.device}, "
+            f"requires_grad={x.requires_grad}"
+        )
+    elif isinstance(x, np.ndarray):
+        print(
+            f"[DEBUG] {name}: "
+            f"type=numpy.ndarray, "
+            f"shape={x.shape}, "
+            f"dtype={x.dtype}"
+        )
+    else:
+        print(
+            f"[DEBUG] {name}: "
+            f"type={type(x).__name__}"
+        )
+
 @dataclass
 class MultiObjectDataset(Dataset):
     """Base class for multi-object datasets."""
@@ -126,6 +149,19 @@ class MultiObjectDataset(Dataset):
             for metadata in self.downstream_metadata
         )
 
+        print("\n========== DATASET INITIALIZATION COMPLETE ==========")
+        print(f"[DEBUG] Dataset: {self.identifier}")
+        print(f"[DEBUG] Dataset path: {self.full_dataset_path}")
+        print(f"[DEBUG] Number of samples: {len(self.idx_range)}")
+        print(f"[DEBUG] Output features: {self.output_features}")
+        print(f"[DEBUG] Dataset size requested: {self.dataset_size}")
+        print(f"[DEBUG] Preload range: {self.preload_range}")
+
+        for name, value in self.data.items():
+            debug_tensor(f"self.data['{name}']", value)
+
+        print("======================================================\n")
+
         # Delete dataset because it is not used anymore after init, and it breaks data
         # loading when num_workers>0 (it contains HDF5 objects which cannot be pickled).
         del self.dataset
@@ -161,10 +197,23 @@ class MultiObjectDataset(Dataset):
 
     def _load_data(self) -> Tuple[DataDict, MetadataDict]:
         """Loads data and metadata.
-
         By default, the data is a dict with h5py.Dataset values, but when overriding
         this method we allow arrays too."""
-        return _load_data_hdf5(data_path=self.full_dataset_path)
+                
+        data, metadata = _load_data_hdf5(
+            data_path=self.full_dataset_path
+        )
+
+        print("\n========== _load_data ==========")
+        print(f"[DEBUG] Loading dataset from: {self.full_dataset_path}")
+        print(f"[DEBUG] Features loaded: {list(data.keys())}")
+
+        for name, value in data.items():
+            debug_tensor(f"HDF5 feature '{name}'", value)
+
+        print("================================\n")
+
+        return data, metadata
 
     def _load_dummy_data(self) -> Tuple[Dict[str, np.ndarray], MetadataDict]:
         """Loads dummy data for testing.
@@ -206,22 +255,45 @@ class MultiObjectDataset(Dataset):
             The preprocessed feature data.
         """
         if feature_name == "image":
-            return (
+            result = (
                 torch.as_tensor(feature, dtype=torch.float32).permute(2, 0, 1)
             )
+
+            debug_tensor(
+                f"_preprocess_feature('{feature_name}') OUTPUT",
+                result
+            )
+
+            return result
+
         if feature_name == "mask":
             one_hot_masks = F.one_hot(
                 torch.as_tensor(feature, dtype=torch.int64),
                 num_classes=self.max_num_objects,
             )
-            # (num_objects, 1, height, width)
-            #print(f"Pre-processed mask shape: {one_hot_masks.permute(3, 2, 0, 1).to(torch.float32).shape}")
-            return one_hot_masks.permute(3, 2, 0, 1).to(torch.float32)
+
+            result = one_hot_masks.permute(3, 2, 0, 1).to(torch.float32)
+
+            debug_tensor(
+                f"_preprocess_feature('{feature_name}') OUTPUT",
+                result
+            )
+
+            return result
+        
         if feature_name == "visibility":
             feature = torch.as_tensor(feature, dtype=torch.float32)
-            if feature.dim() == 1:  # e.g. in ObjectsRoom
+
+            if feature.dim() == 1:
                 feature.unsqueeze_(1)
+
+            debug_tensor(
+                f"_preprocess_feature('{feature_name}') OUTPUT",
+                feature
+            )
+
             return feature
+        
         if feature_name == "num_actual_objects":
             return torch.as_tensor(feature, dtype=torch.float32)
         if feature_name in self.metadata.keys():
@@ -238,6 +310,7 @@ class MultiObjectDataset(Dataset):
         return feature
 
     def __getitem__(self, idx):
+        
         out = {}
         for feature_name in self.data.keys():
             out[feature_name] = self._preprocess_feature(
@@ -283,6 +356,16 @@ class MultiObjectDataset(Dataset):
         assert out["mask"].shape == (self.max_num_objects, 1, self.height, self.width)
         assert out["mask"].sum(1).max() <= 1.0
         assert out["mask"].min() >= 0.0
+
+        print(f"\n========== __getitem__ idx={idx} ==========")
+
+        for name, value in out.items():
+            debug_tensor(
+                f"__getitem__ output '{name}'",
+                value
+            )
+
+        print("============================================\n")
 
         return out
 
@@ -524,19 +607,21 @@ class Tetrominoes(MultiObjectDataset):
 def make_dataset(
     dataset_config: DictConfig, starting_index: int, dataset_size: int, kwargs=None, split: str = "train",
 ) -> MultiObjectDataset:
-    logging.info(
-        f"Instantiating dataset with starting_index={starting_index} and size={dataset_size}."
-    )
-    logging.debug(f"Dataset config:\n{dataset_config}")
-    if kwargs is None:
-        kwargs = {}
-    return hydra.utils.instantiate(
-        dataset_config,
-        starting_index=starting_index,
-        dataset_size=dataset_size,
-        split=split,
-        **kwargs,
-    )
+    
+    dataset = hydra.utils.instantiate(
+    dataset_config,
+    starting_index=starting_index,
+    dataset_size=dataset_size,
+    split=split,
+    **kwargs,)
+
+    print("\n========== make_dataset ==========")
+    print(f"[DEBUG] Dataset type: {type(dataset).__name__}")
+    print(f"[DEBUG] Dataset length: {len(dataset)}")
+    print(f"[DEBUG] Split: {split}")
+    print("==================================\n")
+
+    return dataset
 
 
 def make_dataloaders(
@@ -617,6 +702,16 @@ class COCOSlotDataset(MultiObjectDataset):
             print(f'In data/datasets.py: In {self.split} and SAVING TO CACHE')
             data, metadata = self._create_data()
             self.save_to_h5(data, metadata, cache_path_val)
+
+        print("\n========== COCO _load_data: CACHE ==========")
+        print(f"[DEBUG] Split: {self.split}")
+        print(f"[DEBUG] Loaded cache: {cache_path_train}")
+
+        for name, value in data.items():
+            debug_tensor(f"cached '{name}'", value)
+
+        print("=============================================\n")
+
         return data, metadata
 
         # data, metadata = self._create_data()
@@ -667,6 +762,15 @@ class COCOSlotDataset(MultiObjectDataset):
                 metadata["coords"]["mean"] = np.array(metadata["coords"]["mean"], dtype=np.float32)
             if "var" in metadata["coords"]:
                 metadata["coords"]["var"] = np.array(metadata["coords"]["var"], dtype=np.float32)
+
+        print("\n========== load_from_h5 COMPLETE ==========")
+        print(f"[DEBUG] H5 path: {path}")
+        print(f"[DEBUG] Loaded features: {list(data.keys())}")
+
+        for name, value in data.items():
+            debug_tensor(f"H5 -> numpy '{name}'", value)
+
+        print("=============================================\n")
 
         return data, metadata
 
@@ -812,6 +916,22 @@ class COCOSlotDataset(MultiObjectDataset):
             }
         }
 
+        print("\n========== COCO _create_data COMPLETE ==========")
+        print(f"[DEBUG] Split: {self.split}")
+        print(f"[DEBUG] Number of images: {len(images)}")
+        print(f"[DEBUG] Image shape: {data['image'].shape}")
+        print(f"[DEBUG] Image dtype: {data['image'].dtype}")
+        print(f"[DEBUG] Mask shape: {data['mask'].shape}")
+        print(f"[DEBUG] Mask dtype: {data['mask'].dtype}")
+        print(f"[DEBUG] Class shape: {data['class'].shape}")
+        print(f"[DEBUG] Coords shape: {data['coords'].shape}")
+        print(f"[DEBUG] Visibility shape: {data['visibility'].shape}")
+
+        for name, value in data.items():
+            debug_tensor(f"created '{name}'", value)
+
+        print("=================================================\n")
+
         # self.save_to_h5(data, metadata, Path("/data/omkar/object-centric-library/datasets") / "coco_slots.h5")
         return data, metadata
     
@@ -856,351 +976,351 @@ class COCOSlotDataset(MultiObjectDataset):
 
 
 
-@dataclass
-class COCOSlotDinoV2Dataset(MultiObjectDataset):
+# @dataclass
+# class COCOSlotDinoV2Dataset(MultiObjectDataset):
 
-    split: str = "train"
+#     split: str = "train"
 
-    def __post_init__(self):
-        self.processor = AutoImageProcessor.from_pretrained(
-            "facebook/dinov2-base"
-        )
-        self.patch_size=14
-        super().__post_init__()
+#     def __post_init__(self):
+#         self.processor = AutoImageProcessor.from_pretrained(
+#             "facebook/dinov2-base"
+#         )
+#         self.patch_size=14
+#         super().__post_init__()
     
-    # def _preprocess_feature(self, feature, feature_name):
+#     # def _preprocess_feature(self, feature, feature_name):
 
-    #     print(f"COCOSlotDinoV2Dataset pre-process feature (before pre-processing) - Feature Name : {feature_name}, Feature Shape : {feature.shape}")
+#     #     print(f"COCOSlotDinoV2Dataset pre-process feature (before pre-processing) - Feature Name : {feature_name}, Feature Shape : {feature.shape}")
 
-    #     if feature_name == "image":
-    #         # DINOv2 preprocessing
-    #         image = self.processor(
-    #             images=feature,
-    #             return_tensors="pt",
-    #         )["pixel_values"].squeeze(0)   # [3, H_dino, W_dino]
+#     #     if feature_name == "image":
+#     #         # DINOv2 preprocessing
+#     #         image = self.processor(
+#     #             images=feature,
+#     #             return_tensors="pt",
+#     #         )["pixel_values"].squeeze(0)   # [3, H_dino, W_dino]
 
-    #         # Resize to requested dataset dimensions
-    #         image = F.interpolate(
-    #             image.unsqueeze(0),        # [1, 3, H, W]
-    #             size=(self.height, self.width),
-    #             mode="bilinear",
-    #             align_corners=False,
-    #         ).squeeze(0)                    # [3, self.height, self.width]
+#     #         # Resize to requested dataset dimensions
+#     #         image = F.interpolate(
+#     #             image.unsqueeze(0),        # [1, 3, H, W]
+#     #             size=(self.height, self.width),
+#     #             mode="bilinear",
+#     #             align_corners=False,
+#     #         ).squeeze(0)                    # [3, self.height, self.width]
 
-    #         print(
-    #             f"Pre-processed image shape: {image.shape} "
-    #             f"and Pre-processed image data type: {image.dtype}"
-    #         )
+#     #         print(
+#     #             f"Pre-processed image shape: {image.shape} "
+#     #             f"and Pre-processed image data type: {image.dtype}"
+#     #         )
 
 
-    #         return image
+#     #         return image
 
-    #     if feature_name == "mask":
-    #         mask = np.stack([feature] * 3, axis=-1)
+#     #     if feature_name == "mask":
+#     #         mask = np.stack([feature] * 3, axis=-1)
 
-    #         mask = self.processor(
-    #             images=mask,
-    #             do_rescale=False,
-    #             do_normalize=False,
-    #             resample=Image.Resampling.NEAREST,
-    #             return_tensors="pt",
-    #         )["pixel_values"]
+#     #         mask = self.processor(
+#     #             images=mask,
+#     #             do_rescale=False,
+#     #             do_normalize=False,
+#     #             resample=Image.Resampling.NEAREST,
+#     #             return_tensors="pt",
+#     #         )["pixel_values"]
 
-    #         # [1, 3, H, W] -> [H, W]
-    #         mask = mask[0, 0].long().to(torch.int32)
+#     #         # [1, 3, H, W] -> [H, W]
+#     #         mask = mask[0, 0].long().to(torch.int32)
 
-    #         # Resize mask to requested dimensions
-    #         mask = F.interpolate(
-    #             mask.unsqueeze(0).unsqueeze(0).float(),  # [1, 1, H, W]
-    #             size=(self.height, self.width),
-    #             mode="nearest",
-    #         ).squeeze(0).squeeze(0).to(torch.int32)
+#     #         # Resize mask to requested dimensions
+#     #         mask = F.interpolate(
+#     #             mask.unsqueeze(0).unsqueeze(0).float(),  # [1, 1, H, W]
+#     #             size=(self.height, self.width),
+#     #             mode="nearest",
+#     #         ).squeeze(0).squeeze(0).to(torch.int32)
 
-    #         # [H, W] -> [H, W, 1]
-    #         mask = mask.unsqueeze(-1)
+#     #         # [H, W] -> [H, W, 1]
+#     #         mask = mask.unsqueeze(-1)
 
-    #         one_hot_masks = F.one_hot(
-    #             mask.long(),
-    #             num_classes=self.max_num_objects,
-    #         )
+#     #         one_hot_masks = F.one_hot(
+#     #             mask.long(),
+#     #             num_classes=self.max_num_objects,
+#     #         )
 
-    #         one_hot_masks = one_hot_masks.permute(
-    #             3, 2, 0, 1
-    #         ).to(torch.float32)
+#     #         one_hot_masks = one_hot_masks.permute(
+#     #             3, 2, 0, 1
+#     #         ).to(torch.float32)
 
-    #         print(
-    #             f"Pre-processed mask shape: {one_hot_masks.shape} "
-    #             f"and Pre-processed mask data type: {one_hot_masks.dtype}"
-    #         )
+#     #         print(
+#     #             f"Pre-processed mask shape: {one_hot_masks.shape} "
+#     #             f"and Pre-processed mask data type: {one_hot_masks.dtype}"
+#     #         )
 
-    #         return one_hot_masks
+#     #         return one_hot_masks
 
-    #     return super()._preprocess_feature(
-    #         feature,
-    #         feature_name,
-    #     )
+#     #     return super()._preprocess_feature(
+#     #         feature,
+#     #         feature_name,
+#     #     )
 
-    def _load_data(self):
-        cache_path_train = Path("/data/radhika/OCL-Property-Prediction/datasets") / "coco_slots_20000.h5"
-        cache_path_val = Path("/data/radhika/OCL-Property-Prediction/datasets") / "coco_slots_val.h5"
+#     def _load_data(self):
+#         cache_path_train = Path("/data/radhika/OCL-Property-Prediction/datasets") / "coco_slots_20000.h5"
+#         cache_path_val = Path("/data/radhika/OCL-Property-Prediction/datasets") / "coco_slots_val.h5"
 
-        if self.split == 'train' and cache_path_train.exists():
-            print(f'In data/datasets.py: In {self.split} and LOADING FROM CACHE {cache_path_train}')
-            data, metadata = self.load_from_h5(cache_path_train)
-            print(f"Data Mask Shape: {data['mask'].shape} and data mask data type: {data['mask'].dtype}")
-            return data, metadata
-        elif self.split == 'train':
-            print(f'In data/datasets.py: In {self.split} and SAVING TO CACHE')
-            data, metadata = self._create_data()
-            self.save_to_h5(data, metadata, cache_path_train)
-            print(f"Data Mask Shape: {data['mask'].shape} and data mask data type: {data['mask'].dtype}")
+#         if self.split == 'train' and cache_path_train.exists():
+#             print(f'In data/datasets.py: In {self.split} and LOADING FROM CACHE {cache_path_train}')
+#             data, metadata = self.load_from_h5(cache_path_train)
+#             print(f"Data Mask Shape: {data['mask'].shape} and data mask data type: {data['mask'].dtype}")
+#             return data, metadata
+#         elif self.split == 'train':
+#             print(f'In data/datasets.py: In {self.split} and SAVING TO CACHE')
+#             data, metadata = self._create_data()
+#             self.save_to_h5(data, metadata, cache_path_train)
+#             print(f"Data Mask Shape: {data['mask'].shape} and data mask data type: {data['mask'].dtype}")
 
-        if self.split == 'val' and cache_path_val.exists():
-            print(f'In data/datasets.py: In {self.split} and LOADING FROM CACHE {cache_path_val}')
-            data, metadata = self.load_from_h5(cache_path_val)
-            print(f"Data Mask Shape: {data['mask'].shape} and data mask data type: {data['mask'].dtype}")
-            return data, metadata
-        elif self.split == 'val':
-            print(f'In data/datasets.py: In {self.split} and SAVING TO CACHE')
-            data, metadata = self._create_data()
-            self.save_to_h5(data, metadata, cache_path_val)
-            print(f"Data Mask Shape: {data['mask'].shape} and data mask data type: {data['mask'].dtype}")
-        return data, metadata
+#         if self.split == 'val' and cache_path_val.exists():
+#             print(f'In data/datasets.py: In {self.split} and LOADING FROM CACHE {cache_path_val}')
+#             data, metadata = self.load_from_h5(cache_path_val)
+#             print(f"Data Mask Shape: {data['mask'].shape} and data mask data type: {data['mask'].dtype}")
+#             return data, metadata
+#         elif self.split == 'val':
+#             print(f'In data/datasets.py: In {self.split} and SAVING TO CACHE')
+#             data, metadata = self._create_data()
+#             self.save_to_h5(data, metadata, cache_path_val)
+#             print(f"Data Mask Shape: {data['mask'].shape} and data mask data type: {data['mask'].dtype}")
+#         return data, metadata
 
-        # data, metadata = self._create_data()
-        # return data, metadata
+#         # data, metadata = self._create_data()
+#         # return data, metadata
         
-    def save_to_h5(self, data, metadata, path):
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+#     def save_to_h5(self, data, metadata, path):
+#         path = Path(path)
+#         path.parent.mkdir(parents=True, exist_ok=True)
 
-        with h5py.File(path, "w") as f:
-            for k, v in data.items():
-                f.create_dataset(
-                    k,
-                    data=v,
-                    compression="gzip",
-                    dtype=v.dtype   
-                )
+#         with h5py.File(path, "w") as f:
+#             for k, v in data.items():
+#                 f.create_dataset(
+#                     k,
+#                     data=v,
+#                     compression="gzip",
+#                     dtype=v.dtype   
+#                 )
 
-            # convert numpy types → python types
-            def convert(obj):
-                if isinstance(obj, np.ndarray):
-                    return obj.tolist()
-                if isinstance(obj, (np.float32, np.float64)):
-                    return float(obj)
-                if isinstance(obj, (np.int32, np.int64)):
-                    return int(obj)
-                return obj
+#             # convert numpy types → python types
+#             def convert(obj):
+#                 if isinstance(obj, np.ndarray):
+#                     return obj.tolist()
+#                 if isinstance(obj, (np.float32, np.float64)):
+#                     return float(obj)
+#                 if isinstance(obj, (np.int32, np.int64)):
+#                     return int(obj)
+#                 return obj
 
-            metadata_clean = json.loads(json.dumps(metadata, default=convert))
-            f.attrs["metadata"] = json.dumps(metadata_clean)
+#             metadata_clean = json.loads(json.dumps(metadata, default=convert))
+#             f.attrs["metadata"] = json.dumps(metadata_clean)
 
-    def load_from_h5(self, path):
-        path = Path(path)
+#     def load_from_h5(self, path):
+#         path = Path(path)
 
-        with h5py.File(path, "r") as f:
-            data = {
-                "image": f["image"][:],
-                "mask": f["mask"][:],
-                "class": f["class"][:],
-                "coords": f["coords"][:],
-                "visibility": f["visibility"][:],
-            }
+#         with h5py.File(path, "r") as f:
+#             data = {
+#                 "image": f["image"][:],
+#                 "mask": f["mask"][:],
+#                 "class": f["class"][:],
+#                 "coords": f["coords"][:],
+#                 "visibility": f["visibility"][:],
+#             }
 
-            metadata = json.loads(f.attrs["metadata"])
+#             metadata = json.loads(f.attrs["metadata"])
 
-        if "coords" in metadata:
-            if "mean" in metadata["coords"]:
-                metadata["coords"]["mean"] = np.array(metadata["coords"]["mean"], dtype=np.float32)
-            if "var" in metadata["coords"]:
-                metadata["coords"]["var"] = np.array(metadata["coords"]["var"], dtype=np.float32)
+#         if "coords" in metadata:
+#             if "mean" in metadata["coords"]:
+#                 metadata["coords"]["mean"] = np.array(metadata["coords"]["mean"], dtype=np.float32)
+#             if "var" in metadata["coords"]:
+#                 metadata["coords"]["var"] = np.array(metadata["coords"]["var"], dtype=np.float32)
 
-        return data, metadata
+#         return data, metadata
 
-    def _create_data(self) -> Tuple[DataDict, MetadataDict]:
+#     def _create_data(self) -> Tuple[DataDict, MetadataDict]:
 
-        root = Path(self.dataset_path)
-        # ann_file = root / "annotations/instances_train2017.json"
-        # image_dir = root / "train2017"
-        if self.split == "train":
-            ann_file = root / "annotations/instances_train2017.json"
-            image_dir = root / "train2017"
+#         root = Path(self.dataset_path)
+#         # ann_file = root / "annotations/instances_train2017.json"
+#         # image_dir = root / "train2017"
+#         if self.split == "train":
+#             ann_file = root / "annotations/instances_train2017.json"
+#             image_dir = root / "train2017"
 
-        elif self.split == "val":
-            ann_file = root / "annotations/instances_val2017.json"
-            image_dir = root / "val2017"
+#         elif self.split == "val":
+#             ann_file = root / "annotations/instances_val2017.json"
+#             image_dir = root / "val2017"
 
-        else:
-            raise ValueError(f"Unknown split: {self.split}")
+#         else:
+#             raise ValueError(f"Unknown split: {self.split}")
 
-        coco = COCO(str(ann_file))
-        img_ids = list(coco.imgs.keys())
-        random.shuffle(img_ids)
+#         coco = COCO(str(ann_file))
+#         img_ids = list(coco.imgs.keys())
+#         random.shuffle(img_ids)
 
-        images = []
-        masks_all = []
-        classes_all = []
-        coords_all = []
-        visibility_all = []
+#         images = []
+#         masks_all = []
+#         classes_all = []
+#         coords_all = []
+#         visibility_all = []
 
-        max_objects = self.max_num_objects
-        H, W = self.height, self.width
-        cat_ids = sorted(coco.getCatIds())
-        cat2idx = {c: i for i, c in enumerate(cat_ids)}
+#         max_objects = self.max_num_objects
+#         H, W = self.height, self.width
+#         cat_ids = sorted(coco.getCatIds())
+#         cat2idx = {c: i for i, c in enumerate(cat_ids)}
         
-        selected_ids = img_ids[self.starting_index : self.starting_index + self.dataset_size]
-        for img_id in img_ids:
+#         selected_ids = img_ids[self.starting_index : self.starting_index + self.dataset_size]
+#         for img_id in img_ids:
 
-            img_info = coco.loadImgs(img_id)[0]
-            ann_ids = coco.getAnnIds(imgIds=img_id)
-            anns = coco.loadAnns(ann_ids)
+#             img_info = coco.loadImgs(img_id)[0]
+#             ann_ids = coco.getAnnIds(imgIds=img_id)
+#             anns = coco.loadAnns(ann_ids)
 
-            image = Image.open(image_dir / img_info["file_name"]).convert("RGB")
-            image = image.resize((336, 336))
-            image = np.array(image)
+#             image = Image.open(image_dir / img_info["file_name"]).convert("RGB")
+#             image = image.resize((336, 336))
+#             image = np.array(image)
 
-            obj_masks = []
-            class_ids = []
-            areas = []
-            coords = []
-            for ann in anns:
-                m = coco.annToMask(ann)
-                m = Image.fromarray(m.astype(np.uint8))
-                m = m.resize((336, 336), resample=Image.NEAREST)
-                m = np.array(m)
+#             obj_masks = []
+#             class_ids = []
+#             areas = []
+#             coords = []
+#             for ann in anns:
+#                 m = coco.annToMask(ann)
+#                 m = Image.fromarray(m.astype(np.uint8))
+#                 m = m.resize((336, 336), resample=Image.NEAREST)
+#                 m = np.array(m)
 
-                area = m.sum()
+#                 area = m.sum()
 
-                if area == 0:
-                    continue
+#                 if area == 0:
+#                     continue
 
-                obj_masks.append(m)
-                areas.append(area)                
-                class_ids.append(cat2idx[ann["category_id"]])   
+#                 obj_masks.append(m)
+#                 areas.append(area)                
+#                 class_ids.append(cat2idx[ann["category_id"]])   
 
-            if len(obj_masks) == 0:
-                continue
+#             if len(obj_masks) == 0:
+#                 continue
      
-            areas = np.array(areas)
-            topk = np.argsort(areas)[-max_objects:]
-            topk = topk[np.argsort(areas[topk])[::-1]]
+#             areas = np.array(areas)
+#             topk = np.argsort(areas)[-max_objects:]
+#             topk = topk[np.argsort(areas[topk])[::-1]]
             
-            obj_masks = [obj_masks[i] for i in topk]
-            class_ids = [class_ids[i] for i in topk]
+#             obj_masks = [obj_masks[i] for i in topk]
+#             class_ids = [class_ids[i] for i in topk]
 
-            coords = []
-            for m in obj_masks:
-                ys, xs = np.where(m)
-                if len(xs) == 0:
-                    coords.append((0.0, 0.0))
-                else:
-                    coords.append((xs.mean() / W, ys.mean() / H))
+#             coords = []
+#             for m in obj_masks:
+#                 ys, xs = np.where(m)
+#                 if len(xs) == 0:
+#                     coords.append((0.0, 0.0))
+#                 else:
+#                     coords.append((xs.mean() / W, ys.mean() / H))
 
-            N = len(obj_masks)
+#             N = len(obj_masks)
 
-            pad_masks = np.zeros((max_objects, H, W), dtype=np.float32)
-            pad_classes = np.zeros((max_objects,), dtype=np.int64)
-            pad_coords = np.zeros((max_objects, 2), dtype=np.float32)
-            pad_vis = np.zeros((max_objects,), dtype=np.float32)
+#             pad_masks = np.zeros((max_objects, H, W), dtype=np.float32)
+#             pad_classes = np.zeros((max_objects,), dtype=np.int64)
+#             pad_coords = np.zeros((max_objects, 2), dtype=np.float32)
+#             pad_vis = np.zeros((max_objects,), dtype=np.float32)
             
-            for i in range(N):
-                pad_masks[i] = obj_masks[i]
-                pad_classes[i] = class_ids[i]
-                pad_coords[i] = coords[i]
-                pad_vis[i] = 1.0
+#             for i in range(N):
+#                 pad_masks[i] = obj_masks[i]
+#                 pad_classes[i] = class_ids[i]
+#                 pad_coords[i] = coords[i]
+#                 pad_vis[i] = 1.0
             
-            instance_map = np.zeros((H, W), dtype=np.int32)
-            for i in range(N):
-                instance_map[obj_masks[i] > 0] = i  
+#             instance_map = np.zeros((H, W), dtype=np.int32)
+#             for i in range(N):
+#                 instance_map[obj_masks[i] > 0] = i  
 
-            images.append(np.array(image))
-            masks_all.append(instance_map)
-            classes_all.append(pad_classes)
-            coords_all.append(pad_coords)
-            visibility_all.append(pad_vis)
+#             images.append(np.array(image))
+#             masks_all.append(instance_map)
+#             classes_all.append(pad_classes)
+#             coords_all.append(pad_coords)
+#             visibility_all.append(pad_vis)
 
-            # self.visualize(image, obj_masks, coords, img_id)
+#             # self.visualize(image, obj_masks, coords, img_id)
 
-            if len(images) == 21000: #21000: #00:
-                break
+#             if len(images) == 21000: #21000: #00:
+#                 break
         
-        coords = np.array(coords_all)
-        coords_flat = coords.reshape(-1, 2)
-        coords_mean = coords_flat.mean(axis=0).astype(np.float32)
-        coords_var = coords_flat.var(axis=0).astype(np.float32)
+#         coords = np.array(coords_all)
+#         coords_flat = coords.reshape(-1, 2)
+#         coords_mean = coords_flat.mean(axis=0).astype(np.float32)
+#         coords_var = coords_flat.var(axis=0).astype(np.float32)
 
-        masks = np.stack(masks_all)   # (B, H, W)
-        masks = masks[:, :, :, None] #(B,H,W,1)
+#         masks = np.stack(masks_all)   # (B, H, W)
+#         masks = masks[:, :, :, None] #(B,H,W,1)
 
-        print(f"Masks Shape: {masks.shape}")
+#         print(f"Masks Shape: {masks.shape}")
 
-        data = {
-            "image": np.stack(images),                  # (B, H, W, 3) : (10, 336, 336, 3)
-            "mask": masks,               # (B, H, W,1) : (10, 336, 336, 1)
-            "class": np.stack(classes_all),            # (B, N) : (10, 6)
-            "coords": np.stack(coords_all),            # (B, N, 2) : (10, 6, 2)
-            "visibility": np.stack(visibility_all),    # (B, N) : (10, 6)
-        }
+#         data = {
+#             "image": np.stack(images),                  # (B, H, W, 3) : (10, 336, 336, 3)
+#             "mask": masks,               # (B, H, W,1) : (10, 336, 336, 1)
+#             "class": np.stack(classes_all),            # (B, N) : (10, 6)
+#             "coords": np.stack(coords_all),            # (B, N, 2) : (10, 6, 2)
+#             "visibility": np.stack(visibility_all),    # (B, N) : (10, 6)
+#         }
 
-        metadata = {
-            "self.dataset": {
-                "num_samples": len(images)
-            },
-            "class": {
-                "type": "categorical",
-                "num_categories": len(cat2idx),
-                "shape": (len(cat2idx),)
-            },
-            "coords": {
-                "type": "numerical",
-                "shape": (2,),
-                "mean": coords_mean,
-                "var": coords_var,
-            }
-        }
+#         metadata = {
+#             "self.dataset": {
+#                 "num_samples": len(images)
+#             },
+#             "class": {
+#                 "type": "categorical",
+#                 "num_categories": len(cat2idx),
+#                 "shape": (len(cat2idx),)
+#             },
+#             "coords": {
+#                 "type": "numerical",
+#                 "shape": (2,),
+#                 "mean": coords_mean,
+#                 "var": coords_var,
+#             }
+#         }
 
-        # self.save_to_h5(data, metadata, Path("/data/omkar/object-centric-library/datasets") / "coco_slots.h5")
-        return data, metadata
+#         # self.save_to_h5(data, metadata, Path("/data/omkar/object-centric-library/datasets") / "coco_slots.h5")
+#         return data, metadata
 
-    def visualize(self, image, obj_masks, coords=None, img_id=None):
-        save_path=f"/data/omkar/object-centric-library/vis/{img_id}.png"
+#     def visualize(self, image, obj_masks, coords=None, img_id=None):
+#         save_path=f"/data/omkar/object-centric-library/vis/{img_id}.png"
 
-        H, W, _ = image.shape
+#         H, W, _ = image.shape
 
-        img = image.astype(np.float32) / 255.0
-        overlay = img.copy()
+#         img = image.astype(np.float32) / 255.0
+#         overlay = img.copy()
 
-        valid_masks = [m for m in obj_masks if m.sum() > 0]
-        num_objs = len(valid_masks)
+#         valid_masks = [m for m in obj_masks if m.sum() > 0]
+#         num_objs = len(valid_masks)
 
-        for i, m in enumerate(obj_masks):
-            if m.sum() == 0:
-                continue
+#         for i, m in enumerate(obj_masks):
+#             if m.sum() == 0:
+#                 continue
 
-            hue = i / max(1, num_objs)
-            r, g, b = colorsys.hsv_to_rgb(hue, 0.4, 1.0)
-            color = np.array([r, g, b])
+#             hue = i / max(1, num_objs)
+#             r, g, b = colorsys.hsv_to_rgb(hue, 0.4, 1.0)
+#             color = np.array([r, g, b])
 
-            m = m.astype(bool)
-            overlay[m] = overlay[m] * 0.7 + color * 0.5
+#             m = m.astype(bool)
+#             overlay[m] = overlay[m] * 0.7 + color * 0.5
 
-            if coords is not None:
-                x, y = coords[i]
-                cx, cy = int(x * W), int(y * H)
+#             if coords is not None:
+#                 x, y = coords[i]
+#                 cx, cy = int(x * W), int(y * H)
 
-                cx = np.clip(cx, 2, W - 3)
-                cy = np.clip(cy, 2, H - 3)
+#                 cx = np.clip(cx, 2, W - 3)
+#                 cy = np.clip(cy, 2, H - 3)
 
-                overlay[cy-2:cy+2, cx-2:cx+2] = [1.0, 1.0, 1.0]
+#                 overlay[cy-2:cy+2, cx-2:cx+2] = [1.0, 1.0, 1.0]
 
-        plt.figure(figsize=(6, 6))
-        plt.imshow(overlay)
-        plt.axis('off')
-        plt.title(f"{num_objs} objects")
+#         plt.figure(figsize=(6, 6))
+#         plt.imshow(overlay)
+#         plt.axis('off')
+#         plt.title(f"{num_objs} objects")
 
-        plt.savefig(save_path, bbox_inches='tight', pad_inches=0, dpi=200)
-        plt.close()
+#         plt.savefig(save_path, bbox_inches='tight', pad_inches=0, dpi=200)
+#         plt.close()
 
 
 
@@ -1215,7 +1335,7 @@ def make_dataloader(
     num_workers: int = 0,
 ) -> DataLoader:
     dataset = make_dataset(dataset_config, starting_index, dataset_size)
-    return DataLoader(
+    dataloader = DataLoader(
         dataset,
         batch_size,
         shuffle=shuffle,
@@ -1224,6 +1344,16 @@ def make_dataloader(
         pin_memory=pin_memory,
     )
 
+    print("\n========== make_dataloader ==========")
+    print(f"[DEBUG] Dataset type: {type(dataset).__name__}")
+    print(f"[DEBUG] Dataset length: {len(dataset)}")
+    print(f"[DEBUG] Batch size: {batch_size}")
+    print(f"[DEBUG] Number of workers: {num_workers}")
+    print(f"[DEBUG] Pin memory: {pin_memory}")
+    print(f"[DEBUG] Number of batches: {len(dataloader)}")
+    print("=====================================\n")
+
+    return dataloader
 
 def _normalize_numerical_feature(
     data: np.array, metadata: MetadataDict, feature_name: str
