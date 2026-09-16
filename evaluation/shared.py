@@ -31,13 +31,24 @@ class DownstreamStep:
     num_slots: int
     features_size: int
     optimizer: Optional[torch.optim.Optimizer] = None
+    gradient_accumulation_steps: int = 1
     use_cache: bool = False
     config: Optional[Any] = None
+    _accumulation_step: int = field(default=0, init=False)
+    _accumulated_selected: Optional[Tensor] = field(default=None, init=False)
 
     training: bool = field(default=True, init=False)
 
     def __post_init__(self):
         self.cache = {}
+
+        if self.gradient_accumulation_steps < 1:
+            raise ValueError(
+                "gradient_accumulation_steps must be >= 1"
+            )
+
+        if self.optimizer is not None:
+            self.optimizer.zero_grad()
 
     @property
     @abstractmethod
@@ -54,7 +65,13 @@ class DownstreamStep:
         return batch
 
     @abstractmethod
-    def _predict(self, x: Tensor, idxs: Tensor) -> Dict[str, Any]:
+    def _predict(
+        self,
+        x: Tensor,
+        idxs: Tensor,
+        mask,
+        config,
+    ) -> Dict[str, Any]:
         ...
 
     def _save_to_cache(self, idxs: Tensor, dct: Dict[str, Tensor]) -> None:
@@ -94,24 +111,96 @@ class DownstreamStep:
         return out
 
     def __call__(self, engine: Engine, batch: Dict[str, Any]) -> Dict[str, Any]:
-        if self.optimizer is not None and self.training:
-            self.optimizer.zero_grad()
 
+        # ------------------------------------------------------------
         # Forward pass
+        # ------------------------------------------------------------
         batch = self._preprocess(batch)
-        out = self._predict(batch["image"], batch["sample_id"], batch['mask'], self.config)
+        out = self._predict(
+            batch["image"],
+            batch["sample_id"],
+            batch["mask"],
+            self.config,
+        )
 
-        # Main part of prediction step.
+        # ------------------------------------------------------------
+        # Main part of prediction step
+        # ------------------------------------------------------------
         out = self._internal_call(batch, out)
 
-        # Optimization step, if training.
+        # ------------------------------------------------------------
+        # Optimization step
+        # ------------------------------------------------------------
         if self.optimizer is not None and self.training:
-            out["loss"].backward()
-            # torch.nn.utils.clip_grad_norm_(self.downstream_model.parameters(), 1.0)
-            self.optimizer.step()
+
+            # Start of a new gradient-accumulation window.
+            if self._accumulation_step == 0:
+                self.optimizer.zero_grad(set_to_none=True)
+                self._accumulated_selected = None
+
+            # Number of selected objects in this microbatch.
+            selected_count = out["is_selected"].sum()
+
+            # --------------------------------------------------------
+            # Accumulate TOTAL loss, rather than mean loss.
+            #
+            # out["loss"] =
+            #     sum(loss_per_object) / selected_count
+            #
+            # Therefore multiplying by selected_count gives:
+            #
+            #     total_loss = sum(loss_per_object)
+            #
+            # This lets us correctly combine microbatches with
+            # different numbers of selected objects.
+            # --------------------------------------------------------
+            loss_for_backward = out["loss"] * selected_count
+
+            loss_for_backward.backward()
+
+            # Accumulate denominator for final normalization.
+            if self._accumulated_selected is None:
+                self._accumulated_selected = selected_count.detach()
+            else:
+                self._accumulated_selected += selected_count.detach()
+
+            self._accumulation_step += 1
+
+            print(
+                f"[GradAccum] "
+                f"microbatch={self._accumulation_step}/"
+                f"{self.gradient_accumulation_steps} "
+                f"loss={out['loss'].item():.6f} "
+                f"selected={selected_count.item():.0f}"
+            )
+
+            # --------------------------------------------------------
+            # Only update optimizer at accumulation boundary.
+            # --------------------------------------------------------
+            if self._accumulation_step == self.gradient_accumulation_steps:
+
+                # Total number of selected objects across all
+                # microbatches.
+                total_selected = self._accumulated_selected
+
+                # Convert accumulated total gradient into the
+                # mean gradient over all selected objects.
+                for parameter in self.downstream_model.parameters():
+                    if parameter.grad is not None:
+                        parameter.grad.div_(total_selected)
+
+                self.optimizer.step()
+
+                print(
+                    f"[GradAccum] >>> optimizer.step() "
+                    f"(selected={total_selected.item():.0f}) <<<"
+                )
+
+                # Reset accumulation state.
+                self._accumulation_step = 0
+                self._accumulated_selected = None
 
         return out
-
 
 @torch.no_grad()
 def eval_shared(config, run_eval, eval_name, get_dataset_size, get_batch_size):

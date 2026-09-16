@@ -33,6 +33,30 @@ from pathlib import Path
 import json
 
 
+def debug_tensor(name, x):
+    if torch.is_tensor(x):
+        print(
+            f"[DEBUG] {name}: "
+            f"type={type(x).__name__}, "
+            f"shape={tuple(x.shape)}, "
+            f"dtype={x.dtype}, "
+            f"device={x.device}, "
+            f"requires_grad={x.requires_grad}"
+        )
+    elif isinstance(x, np.ndarray):
+        print(
+            f"[DEBUG] {name}: "
+            f"type=numpy.ndarray, "
+            f"shape={x.shape}, "
+            f"dtype={x.dtype}"
+        )
+    else:
+        print(
+            f"[DEBUG] {name}: "
+            f"type={type(x).__name__}"
+        )
+
+
 @dataclass
 class MultiObjectDataset(Dataset):
     """Base class for multi-object datasets."""
@@ -125,6 +149,19 @@ class MultiObjectDataset(Dataset):
             for metadata in self.downstream_metadata
         )
 
+        print("\n========== DATASET INITIALIZATION COMPLETE ==========")
+        print(f"[DEBUG] Dataset: {self.identifier}")
+        print(f"[DEBUG] Dataset path: {self.full_dataset_path}")
+        print(f"[DEBUG] Number of samples: {len(self.idx_range)}")
+        print(f"[DEBUG] Output features: {self.output_features}")
+        print(f"[DEBUG] Dataset size requested: {self.dataset_size}")
+        print(f"[DEBUG] Preload range: {self.preload_range}")
+
+        for name, value in self.data.items():
+            debug_tensor(f"self.data['{name}']", value)
+
+        print("======================================================\n")
+
         # Delete dataset because it is not used anymore after init, and it breaks data
         # loading when num_workers>0 (it contains HDF5 objects which cannot be pickled).
         del self.dataset
@@ -160,10 +197,24 @@ class MultiObjectDataset(Dataset):
 
     def _load_data(self) -> Tuple[DataDict, MetadataDict]:
         """Loads data and metadata.
-
         By default, the data is a dict with h5py.Dataset values, but when overriding
         this method we allow arrays too."""
-        return _load_data_hdf5(data_path=self.full_dataset_path)
+                
+        data, metadata = _load_data_hdf5(
+            data_path=self.full_dataset_path
+        )
+
+        print("\n========== _load_data ==========")
+        print(f"[DEBUG] Loading dataset from: {self.full_dataset_path}")
+        print(f"[DEBUG] Features loaded: {list(data.keys())}")
+
+        for name, value in data.items():
+            debug_tensor(f"HDF5 feature '{name}'", value)
+
+        print("================================\n")
+
+        return data, metadata
+
 
     def _load_dummy_data(self) -> Tuple[Dict[str, np.ndarray], MetadataDict]:
         """Loads dummy data for testing.
@@ -205,21 +256,47 @@ class MultiObjectDataset(Dataset):
             The preprocessed feature data.
         """
         if feature_name == "image":
-            return (
-                torch.as_tensor(feature, dtype=torch.float32).permute(2, 0, 1) / 255.0
+            result = (
+                torch.as_tensor(feature, dtype=torch.float32)
+                .permute(2, 0, 1)
+                / 255.0
             )
+
+            debug_tensor(
+                f"_preprocess_feature('{feature_name}') OUTPUT",
+                result
+            )
+
+            return result
+        
         if feature_name == "mask":
             one_hot_masks = F.one_hot(
                 torch.as_tensor(feature, dtype=torch.int64),
                 num_classes=self.max_num_objects,
             )
-            # (num_objects, 1, height, width)
-            return one_hot_masks.permute(3, 2, 0, 1).to(torch.float32)
+
+            result = one_hot_masks.permute(3, 2, 0, 1).to(torch.float32)
+
+            debug_tensor(
+                f"_preprocess_feature('{feature_name}') OUTPUT",
+                result
+            )
+
+            return result
+
         if feature_name == "visibility":
             feature = torch.as_tensor(feature, dtype=torch.float32)
-            if feature.dim() == 1:  # e.g. in ObjectsRoom
+
+            if feature.dim() == 1:
                 feature.unsqueeze_(1)
+
+            debug_tensor(
+                f"_preprocess_feature('{feature_name}') OUTPUT",
+                feature
+            )
+
             return feature
+
         if feature_name == "num_actual_objects":
             return torch.as_tensor(feature, dtype=torch.float32)
         if feature_name in self.metadata.keys():
@@ -277,6 +354,16 @@ class MultiObjectDataset(Dataset):
         assert out["mask"].shape == (self.max_num_objects, 1, self.height, self.width)
         assert out["mask"].sum(1).max() <= 1.0
         assert out["mask"].min() >= 0.0
+
+        print(f"\n========== __getitem__ idx={idx} ==========")
+
+        for name, value in out.items():
+            debug_tensor(
+                f"__getitem__ output '{name}'",
+                value
+            )
+
+        print("============================================\n")
 
         return out
 
@@ -518,19 +605,21 @@ class Tetrominoes(MultiObjectDataset):
 def make_dataset(
     dataset_config: DictConfig, starting_index: int, dataset_size: int, kwargs=None, split: str = "train",
 ) -> MultiObjectDataset:
-    logging.info(
-        f"Instantiating dataset with starting_index={starting_index} and size={dataset_size}."
-    )
-    logging.debug(f"Dataset config:\n{dataset_config}")
-    if kwargs is None:
-        kwargs = {}
-    return hydra.utils.instantiate(
-        dataset_config,
-        starting_index=starting_index,
-        dataset_size=dataset_size,
-        split=split,
-        **kwargs,
-    )
+    
+    dataset = hydra.utils.instantiate(
+    dataset_config,
+    starting_index=starting_index,
+    dataset_size=dataset_size,
+    split=split,
+    **kwargs,)
+
+    print("\n========== make_dataset ==========")
+    print(f"[DEBUG] Dataset type: {type(dataset).__name__}")
+    print(f"[DEBUG] Dataset length: {len(dataset)}")
+    print(f"[DEBUG] Split: {split}")
+    print("==================================\n")
+
+    return dataset
 
 
 def make_dataloaders(
@@ -610,6 +699,16 @@ class COCOSlotDataset(MultiObjectDataset):
             print(f'In data/datasets.py: In {self.split} and SAVING TO CACHE')
             data, metadata = self._create_data()
             self.save_to_h5(data, metadata, cache_path_val)
+
+        print("\n========== COCO _load_data: CACHE ==========")
+        print(f"[DEBUG] Split: {self.split}")
+        print(f"[DEBUG] Loaded cache: {cache_path_train}")
+
+        for name, value in data.items():
+            debug_tensor(f"cached '{name}'", value)
+
+        print("=============================================\n")
+
         return data, metadata
 
         # data, metadata = self._create_data()
@@ -660,6 +759,15 @@ class COCOSlotDataset(MultiObjectDataset):
                 metadata["coords"]["mean"] = np.array(metadata["coords"]["mean"], dtype=np.float32)
             if "var" in metadata["coords"]:
                 metadata["coords"]["var"] = np.array(metadata["coords"]["var"], dtype=np.float32)
+
+        print("\n========== load_from_h5 COMPLETE ==========")
+        print(f"[DEBUG] H5 path: {path}")
+        print(f"[DEBUG] Loaded features: {list(data.keys())}")
+
+        for name, value in data.items():
+            debug_tensor(f"H5 -> numpy '{name}'", value)
+
+        print("=============================================\n")
 
         return data, metadata
 
@@ -803,6 +911,22 @@ class COCOSlotDataset(MultiObjectDataset):
             }
         }
 
+        print("\n========== COCO _create_data COMPLETE ==========")
+        print(f"[DEBUG] Split: {self.split}")
+        print(f"[DEBUG] Number of images: {len(images)}")
+        print(f"[DEBUG] Image shape: {data['image'].shape}")
+        print(f"[DEBUG] Image dtype: {data['image'].dtype}")
+        print(f"[DEBUG] Mask shape: {data['mask'].shape}")
+        print(f"[DEBUG] Mask dtype: {data['mask'].dtype}")
+        print(f"[DEBUG] Class shape: {data['class'].shape}")
+        print(f"[DEBUG] Coords shape: {data['coords'].shape}")
+        print(f"[DEBUG] Visibility shape: {data['visibility'].shape}")
+
+        for name, value in data.items():
+            debug_tensor(f"created '{name}'", value)
+
+        print("=================================================\n")
+
         # self.save_to_h5(data, metadata, Path("/data/omkar/object-centric-library/datasets") / "coco_slots.h5")
         return data, metadata
     
@@ -855,8 +979,10 @@ def make_dataloader(
     pin_memory: bool = True,
     num_workers: int = 0,
 ) -> DataLoader:
+    
     dataset = make_dataset(dataset_config, starting_index, dataset_size)
-    return DataLoader(
+    
+    dataloader = DataLoader(
         dataset,
         batch_size,
         shuffle=shuffle,
@@ -865,6 +991,16 @@ def make_dataloader(
         pin_memory=pin_memory,
     )
 
+    print("\n========== make_dataloader ==========")
+    print(f"[DEBUG] Dataset type: {type(dataset).__name__}")
+    print(f"[DEBUG] Dataset length: {len(dataset)}")
+    print(f"[DEBUG] Batch size: {batch_size}")
+    print(f"[DEBUG] Number of workers: {num_workers}")
+    print(f"[DEBUG] Pin memory: {pin_memory}")
+    print(f"[DEBUG] Number of batches: {len(dataloader)}")
+    print("=====================================\n")
+
+    return dataloader
 
 def _normalize_numerical_feature(
     data: np.array, metadata: MetadataDict, feature_name: str

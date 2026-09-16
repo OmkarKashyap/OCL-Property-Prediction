@@ -107,12 +107,57 @@ class DownstreamPredictionStep(DownstreamStep):
         if self.ignored_features is None:
             self.ignored_features = []
 
+    # def _preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+    #     for name in ["image", "y_true", "is_foreground", "is_modified", "mask"]:
+    #         batch[name] = batch[name].to(self.device, non_blocking=True)
+    #     return batch
+
     def _preprocess(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+
+        print("\n========== BEFORE CPU → GPU ==========")
+        for name in ["image", "y_true", "is_foreground", "is_modified", "mask"]:
+            if torch.is_tensor(batch[name]):
+                print(
+                    f"[BEFORE GPU] {name}: "
+                    f"shape={tuple(batch[name].shape)}, "
+                    f"dtype={batch[name].dtype}, "
+                    f"device={batch[name].device}"
+                )
+
         for name in ["image", "y_true", "is_foreground", "is_modified", "mask"]:
             batch[name] = batch[name].to(self.device, non_blocking=True)
+
+        print("========== AFTER CPU → GPU ==========")
+        for name in ["image", "y_true", "is_foreground", "is_modified", "mask"]:
+            if torch.is_tensor(batch[name]):
+                print(
+                    f"[AFTER GPU] {name}: "
+                    f"shape={tuple(batch[name].shape)}, "
+                    f"dtype={batch[name].dtype}, "
+                    f"device={batch[name].device}"
+                )
+
         return batch
 
     def _predict(self, x: Tensor, idxs: Tensor, mask, config) -> Dict[str, Any]:
+
+        print("\n========== ENTERING DownstreamPredictionStep _PREDICT ==========")
+        print(
+            f"[MODEL INPUT] x: "
+            f"shape={tuple(x.shape)}, "
+            f"dtype={x.dtype}, "
+            f"device={x.device}"
+        )
+        print(
+            f"[MODEL INPUT] mask: "
+            f"shape={tuple(mask.shape)}, "
+            f"dtype={mask.dtype}, "
+            f"device={mask.device}"
+        )
+        print(f"[MODEL] device={self.device}")
+        print(f"[MODEL] name={config.model.name}")
+
+
         with torch.no_grad():
             # The output is on cpu because the cache is on cpu.
             output = self._get_cached_representation(idxs)
@@ -135,8 +180,15 @@ class DownstreamPredictionStep(DownstreamStep):
                         image_features = image_features[:, 1:]  # remove CLS
                         return image_features
 
+                    print(
+                        f"[BEFORE MODEL] x device={x.device}, "
+                        f"shape={tuple(x.shape)}, dtype={x.dtype}"
+                    )
+
                     image_forward_outs = self.model(x, output_hidden_states=True)
                     image_features = feature_select(image_forward_outs).to(x.dtype)
+
+                    print("[AFTER MODEL] model forward completed")
 
                     B, N, D = image_features.shape #torch.Size([256, 576, 768]) 
                     B, K, C, H_in, W_in = mask.shape #torch.Size([256, 6, 1, 336, 336]) 
@@ -480,7 +532,48 @@ class DownstreamPredictionStep(DownstreamStep):
                         batch_regions = []
                         for slot_id in range(slots.shape[1]):  
                             mask = (predictions[batch_id] == slot_id).float()
-                            masked_feat = patch_features[batch_id].cuda() * mask.unsqueeze(-1) 
+                            
+                            print("\n========== BEFORE masked_feat GPU TRANSFER ==========")
+                            print(
+                                f"[BEFORE .cuda()] patch_features[{batch_id}]: "
+                                f"shape={tuple(patch_features[batch_id].shape)}, "
+                                f"dtype={patch_features[batch_id].dtype}, "
+                                f"device={patch_features[batch_id].device}"
+                            )
+                            print(
+                                f"[BEFORE multiplication] mask: "
+                                f"shape={tuple(mask.shape)}, "
+                                f"dtype={mask.dtype}, "
+                                f"device={mask.device}"
+                            )
+
+                            masked_feat = patch_features[batch_id].cuda()
+
+                            print("========== AFTER masked_feat GPU TRANSFER ==========")
+                            print(
+                                f"[AFTER .cuda()] patch_features[{batch_id}]: "
+                                f"shape={tuple(masked_feat.shape)}, "
+                                f"dtype={masked_feat.dtype}, "
+                                f"device={masked_feat.device}"
+                            )
+
+                            mask_expanded = mask.unsqueeze(-1)
+
+                            print(
+                                f"[MASK EXPANDED] shape={tuple(mask_expanded.shape)}, "
+                                f"dtype={mask_expanded.dtype}, "
+                                f"device={mask_expanded.device}"
+                            )
+
+                            masked_feat = masked_feat * mask_expanded
+
+                            print(
+                                f"[AFTER MASK MULTIPLICATION] masked_feat: "
+                                f"shape={tuple(masked_feat.shape)}, "
+                                f"dtype={masked_feat.dtype}, "
+                                f"device={masked_feat.device}"
+                            )
+
                             summed = masked_feat.sum(dim=(0, 1))  
                             count = mask.sum().clamp(min=1e-6)
                             region_feat = summed / count  
@@ -514,7 +607,33 @@ class DownstreamPredictionStep(DownstreamStep):
                     features = image_features
                     B, P, D = image_features.shape
 
+                    print("\n========== BEFORE vision_encoder GPU TRANSFER ==========")
+                    print(
+                        f"[BEFORE .to(device)] x: "
+                        f"shape={tuple(x.shape)}, "
+                        f"dtype={x.dtype}, "
+                        f"device={x.device}"
+                    )
+                    print(f"[TARGET DEVICE] self.device={self.device}")
+
+                    x_gpu = x.to(self.device)
+
+                    print("========== AFTER x.to(self.device) ==========")
+                    print(
+                        f"[AFTER .to(device)] x_gpu: "
+                        f"shape={tuple(x_gpu.shape)}, "
+                        f"dtype={x_gpu.dtype}, "
+                        f"device={x_gpu.device}"
+                    )
+
+                    print("========== BEFORE vision_encoder FORWARD ==========")
+
                     dinosaur_features = vision_tower.vision_encoder(x.to(self.device)) 
+
+                    print("========== AFTER vision_encoder FORWARD ==========")
+                    print(
+                        f"[VISION OUTPUT] type={type(dinosaur_features)}"
+                    )
 
                     ### Masking
                     ps = 14    
@@ -550,6 +669,15 @@ class DownstreamPredictionStep(DownstreamStep):
                     reconstructions_out = reconstruction
                 
                 elif "dinosaur" in model_name.lower():
+                    print("\n========== BEFORE model.vision_encoder GPU TRANSFER ==========")
+                    print(
+                        f"[BEFORE .to(device)] x: "
+                        f"shape={tuple(x.shape)}, "
+                        f"dtype={x.dtype}, "
+                        f"device={x.device}"
+                    )
+                    print(f"[TARGET DEVICE] self.device={self.device}")
+
                     features = self.model.vision_encoder(x.to(self.device))  
                     reconstruction, slots_out, mask = self.model(features) 
 
