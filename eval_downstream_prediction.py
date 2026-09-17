@@ -26,7 +26,7 @@ from utils.utils import check_common_args, load_config, now, set_all_seeds
 from utils.viz import save_images_as_grid
 
 
-@hydra.main(CONFIG, "eval_downstream_prediction")
+@hydra.main(str(CONFIG), "eval_downstream_prediction")
 @logging_wrapper
 def main(config: DictConfig):
 
