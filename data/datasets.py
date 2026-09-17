@@ -149,7 +149,7 @@ class MultiObjectDataset(Dataset):
             for metadata in self.downstream_metadata
         )
 
-        print("\n========== DATASET INITIALIZATION COMPLETE ==========")
+        print("\n==========MultiObjectDataset DATASET INITIALIZATION COMPLETE ==========")
         print(f"[DEBUG] Dataset: {self.identifier}")
         print(f"[DEBUG] Dataset path: {self.full_dataset_path}")
         print(f"[DEBUG] Number of samples: {len(self.idx_range)}")
@@ -204,7 +204,7 @@ class MultiObjectDataset(Dataset):
             data_path=self.full_dataset_path
         )
 
-        print("\n========== _load_data ==========")
+        print("\n==========MultiObjectDataset _load_data ==========")
         print(f"[DEBUG] Loading dataset from: {self.full_dataset_path}")
         print(f"[DEBUG] Features loaded: {list(data.keys())}")
 
@@ -260,7 +260,7 @@ class MultiObjectDataset(Dataset):
             )
 
             debug_tensor(
-                f"_preprocess_feature('{feature_name}') OUTPUT",
+                f"MultiObjectDataset _preprocess_feature('{feature_name}') OUTPUT",
                 result
             )
 
@@ -275,7 +275,7 @@ class MultiObjectDataset(Dataset):
             result = one_hot_masks.permute(3, 2, 0, 1).to(torch.float32)
 
             debug_tensor(
-                f"_preprocess_feature('{feature_name}') OUTPUT",
+                f"MultiObjectDataset _preprocess_feature('{feature_name}') OUTPUT",
                 result
             )
 
@@ -288,7 +288,7 @@ class MultiObjectDataset(Dataset):
                 feature.unsqueeze_(1)
 
             debug_tensor(
-                f"_preprocess_feature('{feature_name}') OUTPUT",
+                f"MultiObjectDataset _preprocess_feature('{feature_name}') OUTPUT",
                 feature
             )
 
@@ -357,11 +357,11 @@ class MultiObjectDataset(Dataset):
         assert out["mask"].sum(1).max() <= 1.0
         assert out["mask"].min() >= 0.0
 
-        print(f"\n========== __getitem__ idx={idx} ==========")
+        print(f"\n========== MultiObjectDataset Class __getitem__ idx={idx} ==========")
 
         for name, value in out.items():
             debug_tensor(
-                f"__getitem__ output '{name}'",
+                f"MultiObjectDataset __getitem__ output '{name}'",
                 value
             )
 
@@ -703,7 +703,7 @@ class COCOSlotDataset(MultiObjectDataset):
             data, metadata = self._create_data()
             self.save_to_h5(data, metadata, cache_path_val)
 
-        print("\n========== COCO _load_data: CACHE ==========")
+        print("\n========== COCOSlotDataset _load_data: CACHE ==========")
         print(f"[DEBUG] Split: {self.split}")
         print(f"[DEBUG] Loaded cache: {cache_path_train}")
 
@@ -763,7 +763,7 @@ class COCOSlotDataset(MultiObjectDataset):
             if "var" in metadata["coords"]:
                 metadata["coords"]["var"] = np.array(metadata["coords"]["var"], dtype=np.float32)
 
-        print("\n========== load_from_h5 COMPLETE ==========")
+        print("\n==========COCOSlotDataset load_from_h5 COMPLETE ==========")
         print(f"[DEBUG] H5 path: {path}")
         print(f"[DEBUG] Loaded features: {list(data.keys())}")
 
