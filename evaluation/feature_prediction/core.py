@@ -111,7 +111,8 @@ class DownstreamPredictionStep(DownstreamStep):
 
         if "dinov2" in self.config.model.name.lower():
             self.image_processor = AutoImageProcessor.from_pretrained(
-                "facebook/dinov2-base"
+                "facebook/dinov2-base",
+                use_fast=True,
             )
 
         if self.ignored_features is None:
@@ -134,7 +135,7 @@ class DownstreamPredictionStep(DownstreamStep):
         # ============================================================
         # Move everything to GPU
         # ============================================================
-        print("\n========== BEFORE CPU → GPU ==========")
+        print("\n========== DownstreamPredictionStep _preprocess function: BEFORE CPU → GPU ==========")
         for name in ["image", "y_true", "is_foreground", "is_modified", "mask"]:
             if torch.is_tensor(batch[name]):
                 print(
@@ -150,7 +151,7 @@ class DownstreamPredictionStep(DownstreamStep):
                 non_blocking=True,
             )
 
-        print("========== AFTER CPU → GPU ==========")
+        print("========== DownstreamPredictionStep _preprocess function: AFTER CPU → GPU ==========")
         for name in ["image", "y_true", "is_foreground", "is_modified", "mask"]:
             if torch.is_tensor(batch[name]):
                 print(
@@ -192,8 +193,6 @@ class DownstreamPredictionStep(DownstreamStep):
             #       ↓
             # [B, 3, self.height, self.width]
 
-            image = image.to(self.device, non_blocking=True)
-
             image = F.interpolate(
                 image,
                 size=(336, 336),
@@ -207,106 +206,6 @@ class DownstreamPredictionStep(DownstreamStep):
             )
 
             batch["image"] = image
-
-            # # --------------------------------------------------------
-            # # MASK
-            # # --------------------------------------------------------
-            # mask = batch["mask"]
-
-            # print(
-            #     f"DownstreamPredictionStep before pre-process batch - "
-            #     f"Feature Name: mask, Feature Shape: {mask.shape}"
-            # )
-
-            # # Original:
-            # #
-            # # feature: [H, W, 1]
-            # # np.stack([feature] * 3, axis=-1)
-            # #       -> [H, W, 1, 3]
-            # #
-            # # However, because we now have a batch, we should construct
-            # # the equivalent batched representation directly.
-
-            # # [B, H, W, 1] -> [B, H, W, 3]
-            # mask = mask.expand(-1, -1, -1, 3)
-
-            # mask = self.image_processor(
-            #     images=mask,
-            #     do_rescale=False,
-            #     do_normalize=False,
-            #     resample=Image.Resampling.NEAREST,
-            #     return_tensors="pt",
-            # )["pixel_values"]
-
-            # # [B, 3, H, W] -> [B, H, W]
-            # mask = mask[:, 0].long().to(torch.int32)
-
-            # # Resize mask to requested dataset dimensions
-            # #
-            # # [B, H, W]
-            # #    ↓
-            # # [B, 1, H, W]
-            # #    ↓
-            # # interpolate
-            # #    ↓
-            # # [B, H_new, W_new]
-
-            # mask = F.interpolate(
-            #     mask.unsqueeze(1).float(),
-            #     size=(336, 336),
-            #     mode="nearest",
-            # ).squeeze(1).to(torch.int32)
-
-            # # [B, H, W] -> [B, H, W, 1]
-            # mask = mask.unsqueeze(-1)
-
-            # # [B, H, W, 1]
-            # #       ↓ one_hot
-            # # [B, H, W, 1, K]
-            # one_hot_masks = F.one_hot(
-            #     mask.long(),
-            #     num_classes=self.max_num_objects,
-            # )
-
-            # # Original:
-            # #
-            # # [H, W, 1, K]
-            # #       ↓
-            # # [K, 1, H, W]
-            # #
-            # # Batched:
-            # #
-            # # [B, H, W, 1, K]
-            # #       ↓
-            # # [B, K, 1, H, W]
-
-            # one_hot_masks = one_hot_masks.permute(
-            #     0, 4, 3, 1, 2
-            # ).to(torch.float32)
-
-            # print(
-            #     f"Pre-processed mask batch shape: {one_hot_masks.shape} "
-            #     f"and data type: {one_hot_masks.dtype}"
-            # )
-
-            # batch["mask"] = one_hot_masks
-
-            # # ---------------------------------------------------------
-            # # Mask
-            # # ---------------------------------------------------------
-            # mask = batch["mask"]
-
-            # print(
-            #     f"DownstreamPredictionStep pre-process batch - "
-            #     f"Feature Name: mask, Feature Shape: {mask.shape}"
-            # )
-
-            # # Mask is ALREADY one-hot encoded by the Dataset.
-            # # Shape:
-            # # [B, K, 1, H, W]
-            # batch["mask"] = mask
-
-            # mask: [B, K, 1, H, W]
 
             mask = batch["mask"]
 
@@ -383,11 +282,11 @@ class DownstreamPredictionStep(DownstreamStep):
                 print(f"Model: {model_name}")
                 print(f"Image shape: {x.shape}")
                 print(f"Image dtype: {x.dtype}")
-                print(f"Image min: {x.min().item():.6f}")
-                print(f"Image max: {x.max().item():.6f}")
-                print(f"Image mean: {x.mean().item():.6f}")
-                print(f"Image variance: {x.var().item():.6f}")
-                print(f"Image std: {x.std().item():.6f}")
+                print(f"Image min: {x.min():.6f}")
+                print(f"Image max: {x.max():.6f}")
+                print(f"Image mean: {x.mean():.6f}")
+                print(f"Image variance: {x.var():.6f}")
+                print(f"Image std: {x.std():.6f}")
                 print("=================================\n")
 
                 if "dinov2" in model_name.lower():
@@ -419,44 +318,327 @@ class DownstreamPredictionStep(DownstreamStep):
                     patch_masks = patch_masks.view(B, K, H, W)  #torch.Size([256, 6, 24, 24])
 
                     all_reprs = []
-                    for b in range(B):
-                        feats_b = image_features[b]   #torch.Size([576, 768])
-                        masks_bk = patch_masks[b]   #torch.Size([6, 24, 24]) 
+
+                    print("\n========== PATCH MASK DEBUG ==========")
+
+                    print(f"patch_masks shape : {patch_masks.shape}")
+                    print(f"patch_masks dtype : {patch_masks.dtype}")
+                    print(f"patch_masks device: {patch_masks.device}")
+
+                    unique_values = torch.unique(patch_masks)
+                    print(f"Global unique values: {unique_values}")
+
+                    # for b in range(B):
+                    #     print(f"\n--- Image {b} ---")
+
+                    #     feats_b = image_features[b]   #torch.Size([576, 768])
+                    #     masks_bk = patch_masks[b]   #torch.Size([6, 24, 24]) 
             
-                        obj_feats = []
-                        for k in range(K):
-                            mk = masks_bk[k] #torch.Size([24, 24]) 
-                            
-                            obj_ids = torch.unique(mk) #tensor([0, 1], device='cuda:0')
-                            obj_ids = obj_ids[obj_ids > 0] #tensor([1], device='cuda:0')
+                    #     obj_feats = []
+                    #     for k in range(K):
+                    #         mk = masks_bk[k] #torch.Size([24, 24])
 
-                            for oid in obj_ids:
-                                coords = (mk == oid).nonzero(as_tuple=False)  # [num_pixels, 2]
+                    #         unique_k = torch.unique(mk)
+                    #         positive_pixels = (mk > 0).sum()
 
-                                if coords.shape[0] == 0:
-                                    continue
+                    #         print(
+                    #             f"mask[{b},{k}] | "
+                    #             f"unique={unique_k.tolist()} | "
+                    #             f"positive_pixels={positive_pixels}"
+                    #         )
+                                                
+                    #         obj_ids = torch.unique(mk) #tensor([0, 1], device='cuda:0')
+                    #         obj_ids = obj_ids[obj_ids > 0] #tensor([1], device='cuda:0')
 
-                                idxs_obj = coords[:, 0] * W + coords[:, 1]  #torch.Size([35])
+                    #         for oid in obj_ids:
+                    #             coords = (mk == oid).nonzero(as_tuple=False)  # [num_pixels, 2]
 
-                                if len(idxs_obj) >= 2:
-                                    perm = torch.randperm(len(idxs_obj), device=idxs_obj.device)
-                                    chosen = idxs_obj[perm[:2]]
-                                else:
-                                    chosen = idxs_obj.repeat(2)[:2]
+                    #             if coords.shape[0] == 0:
+                    #                 continue
 
-                                # print('CHOSEN', chosen) #CHOSEN tensor([267, 333], device='cuda:0') 
-                                obj_feats.append(feats_b[chosen]) #torch.Size([2, 768]) 
+                    #             idxs_obj = coords[:, 0] * W + coords[:, 1]  #torch.Size([35])
 
-                        while len(obj_feats) < 6:
-                            rand_idx = torch.randint(0, N, (2,))
-                            obj_feats.append(feats_b[rand_idx])
+                    #             if len(idxs_obj) >= 2:
+                    #                 perm = torch.randperm(len(idxs_obj), device=idxs_obj.device)
+                    #                 chosen = idxs_obj[perm[:2]]
+                    #             else:
+                    #                 chosen = idxs_obj.repeat(2)[:2]
 
-                        obj_feats = obj_feats[:6]
-                        obj_feats = torch.cat(obj_feats, dim=0)
+                    #             # print('CHOSEN', chosen) #CHOSEN tensor([267, 333], device='cuda:0') 
+                    #             obj_feats.append(feats_b[chosen]) #torch.Size([2, 768]) 
 
-                        all_reprs.append(obj_feats)
+                    #     while len(obj_feats) < 6:
+                    #         rand_idx = torch.randint(0, N, (2,))
+                    #         obj_feats.append(feats_b[rand_idx])
 
-                    slots_out = torch.stack(all_reprs).to(self.device) #torch.Size([256, 12, 768])
+                    #     obj_feats = obj_feats[:6]
+                    #     obj_feats = torch.cat(obj_feats, dim=0)
+
+                    #     all_reprs.append(obj_feats)
+
+                    # slots_out = torch.stack(all_reprs).to(self.device) #torch.Size([256, 12, 768])
+
+
+                    # ============================================================
+                    # FULLY BATCHED OBJECT FEATURE EXTRACTION
+                    #
+                    # image_features : [B, N, D]
+                    # patch_masks    : [B, K, H, W]
+                    #
+                    # output         : [B, K*2, D]
+                    # ============================================================
+
+                    B, N, D = image_features.shape
+
+                    # ------------------------------------------------------------
+                    # 1. Flatten masks
+                    # ------------------------------------------------------------
+                    # [B, K, H, W] -> [B, K, N]
+                    mask_flat = patch_masks.reshape(B, K, N)
+
+                    # Binary mask:
+                    # True  -> patch belongs to object
+                    # False -> background
+                    valid_patch = mask_flat > 0
+
+
+                    # ------------------------------------------------------------
+                    # 2. Count positive patches for every mask
+                    # ------------------------------------------------------------
+                    # [B, K]
+                    num_valid = valid_patch.sum(dim=-1)
+
+
+                    # ------------------------------------------------------------
+                    # 3. Randomly select TWO positive patches per mask
+                    # ------------------------------------------------------------
+                    #
+                    # Generate one random number per patch.
+                    #
+                    # [B, K, N]
+                    random_scores = torch.rand(B,K,N,device=image_features.device)
+
+                    # Never select background patches.
+                    #
+                    # Background gets +inf, so it cannot be among the
+                    # two smallest values.
+                    random_scores.masked_fill_(
+                        ~valid_patch,
+                        float("inf")
+                    )
+
+                    # Two smallest random scores = two random positive patches.
+                    #
+                    # [B, K, 2]
+                    chosen_idx = torch.topk(
+                        random_scores,
+                        k=2,
+                        dim=-1,
+                        largest=False,
+                        sorted=False,
+                    ).indices
+
+
+                    # ------------------------------------------------------------
+                    # 4. Handle masks containing exactly ONE patch
+                    # ------------------------------------------------------------
+                    #
+                    # For an object containing only one patch, the original code:
+                    #
+                    #     chosen = idxs_obj.repeat(2)[:2]
+                    #
+                    # therefore uses the SAME patch twice.
+                    #
+                    # topk() gives us one valid patch and one invalid/background
+                    # index in this case, so replace the second index with the
+                    # first one.
+                    #
+                    # [B, K]
+                    one_patch = num_valid == 1
+
+                    chosen_idx[:, :, 1] = torch.where(
+                        one_patch,
+                        chosen_idx[:, :, 0],
+                        chosen_idx[:, :, 1],
+                    )
+
+
+                    # ------------------------------------------------------------
+                    # 5. Determine which masks actually contain objects
+                    # ------------------------------------------------------------
+                    #
+                    # [B, K]
+                    valid_object = num_valid > 0
+
+
+                    # ------------------------------------------------------------
+                    # 6. Gather the selected features
+                    # ------------------------------------------------------------
+                    #
+                    # image_features:
+                    #
+                    #     [B, N, D]
+                    #
+                    # chosen_idx:
+                    #
+                    #     [B, K, 2]
+                    #
+                    # We want:
+                    #
+                    #     [B, K, 2, D]
+                    #
+                    # Expand image features along K.
+                    #:""
+                    features_expanded = image_features.unsqueeze(1).expand(
+                        B, K, N, D
+                    )
+
+                    # [B, K, 2, D]
+                    gather_idx = chosen_idx.unsqueeze(-1).expand(
+                        B, K, 2, D
+                    )
+
+                    obj_features = torch.gather(
+                        features_expanded,
+                        dim=2,
+                        index=gather_idx,
+                    )
+
+
+                    # ------------------------------------------------------------
+                    # 7. Compact valid objects
+                    # ------------------------------------------------------------
+                    #
+                    # Current representation has:
+                    #
+                    #     [object/empty/object/empty/object/...]
+                    #
+                    # Your original code instead did:
+                    #
+                    #     [object, object, object, ...]
+                    #     followed by random padding.
+                    #
+                    # We reproduce that behavior using argsort.
+                    #
+                    # valid_object = True  -> comes first
+                    # valid_object = False -> comes later
+                    #
+                    # [B, K]
+                    sort_key = (~valid_object).to(torch.int64)
+
+                    # [B, K]
+                    object_order = torch.argsort(
+                        sort_key,
+                        dim=1,
+                        stable=True,
+                    )
+
+                    # Reorder:
+                    #
+                    # [B, K, 2, D]
+                    obj_features = torch.gather(
+                        obj_features,
+                        dim=1,
+                        index=object_order.unsqueeze(-1)
+                                        .unsqueeze(-1)
+                                        .expand(B, K, 2, D),
+                    )
+
+
+                    # ------------------------------------------------------------
+                    # 8. Number of real objects in every image
+                    # ------------------------------------------------------------
+                    #
+                    # [B]
+                    num_objects = valid_object.sum(dim=1)
+
+
+                    # ------------------------------------------------------------
+                    # 9. Create random padding features
+                    # ------------------------------------------------------------
+                    #
+                    # We create K random object pairs for EVERY image.
+                    #
+                    # This is slightly more computation than creating only the
+                    # required amount, but it keeps the operation completely
+                    # vectorized and avoids a Python loop.
+                    #
+                    # random_padding_idx:
+                    #
+                    #     [B, K, 2]
+                    #
+                    random_padding_idx = torch.randint(
+                        0,
+                        N,
+                        (B, K, 2),
+                        device=image_features.device,
+                    )
+
+                    # Gather random patch features:
+                    #
+                    # [B, K, 2, D]
+                    random_padding_idx_expanded = random_padding_idx.unsqueeze(-1).expand(
+                        B, K, 2, D
+                    )
+
+                    random_padding_features = torch.gather(
+                        features_expanded,
+                        dim=2,
+                        index=random_padding_idx_expanded,
+                    )
+
+
+                    # ------------------------------------------------------------
+                    # 10. Determine which slots need padding
+                    # ------------------------------------------------------------
+                    #
+                    # Example:
+                    #
+                    # num_objects = 4
+                    # K = 6
+                    #
+                    # padding_mask:
+                    #
+                    # [False, False, False, False, True, True]
+                    #
+                    # [B, K]
+                    padding_mask = (
+                        torch.arange(
+                            K,
+                            device=image_features.device,
+                        ).unsqueeze(0)
+                        >= num_objects.unsqueeze(1)
+                    )
+
+
+                    # ------------------------------------------------------------
+                    # 11. Replace empty-object slots with random features
+                    # ------------------------------------------------------------
+                    #
+                    # [B, K, 1, 1] -> broadcast over the 2 patches and D dims
+                    padding_mask = padding_mask.unsqueeze(-1).unsqueeze(-1)
+
+                    obj_features = torch.where(
+                        padding_mask,
+                        random_padding_features,
+                        obj_features,
+                    )
+
+
+                    # ------------------------------------------------------------
+                    # 12. Flatten object + two patches
+                    # ------------------------------------------------------------
+                    #
+                    # [B, K, 2, D]
+                    #       ↓
+                    # [B, K*2, D]
+                    #
+                    slots_out = obj_features.reshape(
+                        B,
+                        K * 2,
+                        D,
+                    )
+
                     masks_out = patch_masks
                     reconstructions_out = slots_out
 
@@ -848,11 +1030,11 @@ class DownstreamPredictionStep(DownstreamStep):
         print("\n====== DOWNSTREAM INPUT DEBUG ======")
         print(f"Representation shape: {representation.shape}")
         print(f"Representation dtype: {representation.dtype}")
-        print(f"Representation min: {representation.min().item():.6f}")
-        print(f"Representation max: {representation.max().item():.6f}")
-        print(f"Representation mean: {representation.mean().item():.6f}")
-        print(f"Representation variance: {representation.var().item():.6f}")
-        print(f"Representation std: {representation.std().item():.6f}")
+        print(f"Representation min: {representation.min():.6f}")
+        print(f"Representation max: {representation.max():.6f}")
+        print(f"Representation mean: {representation.mean():.6f}")
+        print(f"Representation variance: {representation.var():.6f}")
+        print(f"Representation std: {representation.std():.6f}")
         print("====================================\n")
 
         # Forward pass through downstream model.
@@ -1073,14 +1255,14 @@ class DownstreamPredictionStep(DownstreamStep):
                 # Print mask statistics
                 unique_values = torch.unique(obj_mask)
 
-                foreground_pixels = (obj_mask > 0).sum().item()
+                foreground_pixels = (obj_mask > 0).sum()
 
                 print(
                     f"  Object {obj_id}: "
                     f"shape={tuple(obj_mask.shape)}, "
                     f"dtype={obj_mask.dtype}, "
-                    f"min={obj_mask.min().item()}, "
-                    f"max={obj_mask.max().item()}, "
+                    f"min={obj_mask.min()}, "
+                    f"max={obj_mask.max()}, "
                     f"unique={unique_values.tolist()}, "
                     f"foreground_pixels={foreground_pixels}"
                 )
@@ -1466,7 +1648,7 @@ def train(
         # Here `engine` is the validation engine.
         validation_loss = engine.state.metrics["loss"]
         logging.info(
-            f"Validation loss: {validation_loss.item()} (step {train_engine.state.iteration})"
+            f"Validation loss: {validation_loss} (step {train_engine.state.iteration})"
         )
         return -validation_loss
 
