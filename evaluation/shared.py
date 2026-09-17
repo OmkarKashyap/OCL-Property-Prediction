@@ -124,7 +124,7 @@ class DownstreamStep:
         # Forward pass
         # ------------------------------------------------------------
         batch = self._preprocess(batch)
-        self._visualize(batch)
+        # self._visualize(batch)
         out = self._predict(
             batch["image"],
             batch["sample_id"],
